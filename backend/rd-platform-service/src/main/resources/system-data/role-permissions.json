@@ -1,0 +1,47 @@
+{
+  "sys_admin": [
+    "dashboard", "project", "requirement", "task", "submit_test", "bug", "testing", "debt",
+    "knowledge", "change", "notification", "metrics", "system",
+    "requirement:create", "requirement:edit", "requirement:delete", "requirement:cancel",
+    "requirement:test_pass", "requirement:test_reject", "requirement:release", "requirement:dev_progress",
+    "task:create", "task:edit", "task:dev_progress", "task:test_verify",
+    "testcase:create", "testcase:approve", "testcase:manage_locked",
+    "bug:create", "bug:edit", "bug:close", "bug:confirm",
+    "change:create", "change:approve",
+    "project:create", "project:edit", "project:delete", "project:manage_member",
+    "sprint:create", "sprint:edit",
+    "system:manage", "submit:approve"
+  ],
+  "pm": [
+    "dashboard", "project", "requirement", "task", "submit_test", "bug", "testing",
+    "knowledge", "change", "notification", "metrics",
+    "requirement:create", "requirement:edit", "requirement:cancel", "requirement:release",
+    "requirement:dev_progress",
+    "task:create", "task:edit",
+    "testcase:approve",
+    "bug:create", "bug:edit", "bug:confirm",
+    "change:create", "change:approve",
+    "project:create", "project:edit", "project:manage_member",
+    "sprint:create", "sprint:edit",
+    "submit:approve"
+  ],
+  "dev": [
+    "dashboard", "task", "submit_test", "bug", "testing", "debt", "knowledge", "notification",
+    "requirement:dev_progress",
+    "task:dev_progress",
+    "testcase:create",
+    "bug:create", "bug:edit"
+  ],
+  "qa": [
+    "dashboard", "submit_test", "bug", "testing", "knowledge", "notification",
+    "requirement:test_pass", "requirement:test_reject",
+    "task:test_verify",
+    "testcase:create", "testcase:approve",
+    "bug:create", "bug:edit", "bug:close", "bug:confirm",
+    "submit:approve"
+  ],
+  "project_manager": [
+    "dashboard", "project", "testing", "knowledge", "notification",
+    "testcase:create"
+  ]
+}

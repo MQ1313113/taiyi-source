@@ -4,7 +4,7 @@
 
 ## 架构：前后端不分离，单产物部署
 
-前端仍用 React 开发，但**构建时打包进后端 jar**——`mvn package` 产出一个可执行 jar，`java -jar` 一处启动，`:8080` 同时提供 API 与页面，无需 nginx 托管前端、无需单独部署前端。
+前端仍用 React 开发，但**构建时打包进后端 jar**——`mvn package` 产出一个可执行 jar，`java -jar` 一处启动，`:17080` 同时提供 API 与页面，无需 nginx 托管前端、无需单独部署前端。
 
 | 目录 | 说明 | 技术栈 |
 | --- | --- | --- |
@@ -32,7 +32,7 @@
 # Windows：deploy.bat deploy   （构建 + 前台运行）
 ```
 
-> 端口/JVM 参数可用环境变量覆盖：`SERVER_PORT=9090 JAVA_OPTS="-Xmx2g" ./deploy.sh start`
+> 默认端口 `17080`，端口/JVM 参数可用环境变量覆盖：`SERVER_PORT=9090 JAVA_OPTS="-Xmx2g" ./deploy.sh start`（Windows：`set SERVER_PORT=9090`）
 
 手动等价命令：
 
@@ -40,7 +40,7 @@
 cd backend
 mvn -DskipTests package          # 自动执行前端 pnpm build 并打进 jar
 java -jar rd-platform-service/target/rd-platform-service-1.0.0.jar
-# 访问 http://localhost:8080 —— API 与前端页面同一端口
+# 访问 http://localhost:17080 —— API 与前端页面同一端口
 ```
 
 > 仅调后端、想跳过前端构建时：`mvn -DskipTests package -Dskip.frontend=true`
@@ -50,10 +50,10 @@ java -jar rd-platform-service/target/rd-platform-service-1.0.0.jar
 前后端分端口跑，Vite 开发服务器代理 `/api` 到后端，享受热更新：
 
 ```bash
-# 终端 1：后端（:8080）
+# 终端 1：后端（:17080）
 cd backend && mvn spring-boot:run -pl rd-platform-service
 
-# 终端 2：前端（:3000，代理 /api -> :8080）
+# 终端 2：前端（:3000，代理 /api -> :17080）
 cd backend/rd-platform-service/src/main/frontend && pnpm install && pnpm dev
 ```
 

@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 rem ============================================================================
 rem  太一（TaiYi）研发管理平台 —— Windows 一键构建 / 运行脚本
-rem  单产物：前端已内嵌进后端 jar，java -jar 一处启动，:8080 同时提供 API 与页面。
+rem  单产物：前端已内嵌进后端 jar，java -jar 一处启动，:17080 同时提供 API 与页面。
 rem
 rem  用法：
 rem    deploy.bat build   构建（含前端，产出单 jar）
@@ -15,7 +15,7 @@ rem ============================================================================
 set "SCRIPT_DIR=%~dp0"
 set "BACKEND_DIR=%SCRIPT_DIR%backend"
 set "SERVICE_DIR=%BACKEND_DIR%\rd-platform-service"
-if not defined SERVER_PORT set "SERVER_PORT=8080"
+if not defined SERVER_PORT set "SERVER_PORT=17080"
 if not defined JAVA_OPTS set "JAVA_OPTS=-Xms512m -Xmx1024m"
 
 set "CMD=%~1"

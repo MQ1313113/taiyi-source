@@ -98,7 +98,7 @@ mvn clean package -DskipTests            # 自动构建前端并打进 jar
 java -jar rd-platform-service/target/rd-platform-service-1.0.0.jar
 ```
 
-访问 `http://localhost:8080` —— API 与前端页面同一端口。仅调后端可加 `-Dskip.frontend=true` 跳过前端构建。
+访问 `http://localhost:17080` —— API 与前端页面同一端口（默认端口 `17080`，可用 `SERVER_PORT` 覆盖）。仅调后端可加 `-Dskip.frontend=true` 跳过前端构建。
 
 ### 3. 前端本地开发（可选，HMR）
 
@@ -108,7 +108,7 @@ pnpm install
 pnpm dev
 ```
 
-前端启动在 `http://localhost:3000`，自动代理 `/api` 到后端 `:8080`。
+前端启动在 `http://localhost:3000`，自动代理 `/api` 到后端 `:17080`（与 `SERVER_PORT` 一致，可覆盖）。
 
 ### 4. 默认账号
 
@@ -144,7 +144,7 @@ services:
   app:                                   # 同时提供 API 与前端页面
     build: .
     ports:
-      - "8080:8080"
+      - "17080:17080"
     depends_on:
       - mysql
     environment:
@@ -157,7 +157,7 @@ services:
 
 1. 提前下载所有依赖包（Maven 离线仓库 + pnpm 离线包）
 2. 将单个 `rd-platform-service-1.0.0.jar`（已含前端）拷贝至目标服务器
-3. 使用 systemd 管理该服务，监听 `:8080` 即对外提供全部功能（API 与前端页面同端口，无需 nginx）
+3. 使用 systemd 管理该服务，监听 `:17080` 即对外提供全部功能（API 与前端页面同端口，无需 nginx）
 
 ## API 文档
 

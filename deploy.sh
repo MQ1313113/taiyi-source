@@ -2,7 +2,7 @@
 # =============================================================================
 # 太一（TaiYi）研发管理平台 —— 一键部署 / 启动脚本
 #
-# 单产物：前端已内嵌进后端 jar，java -jar 一处启动，:8080 同时提供 API 与页面，
+# 单产物：前端已内嵌进后端 jar，java -jar 一处启动，:17080 同时提供 API 与页面，
 #          无需 nginx、无需单独部署前端。
 #
 # 用法：
@@ -28,7 +28,7 @@ LOG_DIR="$SCRIPT_DIR/logs"
 LOG_FILE="$LOG_DIR/taiyi.log"
 
 # ---- 可通过环境变量覆盖 ----
-SERVER_PORT="${SERVER_PORT:-8080}"
+SERVER_PORT="${SERVER_PORT:-17080}"
 JAVA_OPTS="${JAVA_OPTS:--Xms512m -Xmx1024m}"
 SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-}"
 

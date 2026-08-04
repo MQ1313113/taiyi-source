@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
 
 // 角色类型定义
-export type RoleType = "sys_admin" | "pm" | "developer" | "qa" | "project_manager";
+export type RoleType = "sys_admin" | "pm" | "developer" | "qa";
 
 // 前端使用的权限标识（保持不变，各页面已在使用）
 export type Permission =
@@ -28,7 +28,9 @@ export type Permission =
   // 依赖
   | "dep:manage"
   // 系统
-  | "sys:user" | "sys:audit" | "sys:config" | "sys:setting" | "sys:gear";
+  | "sys:user" | "sys:audit" | "sys:config" | "sys:setting" | "sys:gear"
+  // 工单
+  | "ticket:create" | "ticket:triage" | "ticket:view";
 
 // 后端权限编码 → 前端权限编码 映射表
 // 后端格式: "requirement:create", 前端格式: "req:create"
@@ -69,6 +71,9 @@ const backendToFrontendPermMap: Record<string, Permission[]> = {
   "sprint:edit": ["sprint:edit"],
   // 系统管理
   "system:manage": ["sys:user", "sys:audit", "sys:config", "sys:setting", "sys:gear"],
+  // 工单
+  "ticket:create": ["ticket:create"],
+  "ticket:triage": ["ticket:triage"],
 };
 
 // 后端菜单权限 → 前端菜单key映射
@@ -83,10 +88,11 @@ const backendMenuToKey: Record<string, string[]> = {
   "change": ["changes"],
   "debt": ["debt"],
   "knowledge": ["knowledge"],
-  "metric": ["metrics"],
+  "metric": ["metrics", "governance"],
   "notification": ["notifications"],
   "system": ["settings"],
   "audit": ["audit"],
+  "ticket": ["tickets"],
 };
 
 // 将后端返回的权限编码列表转换为前端权限列表
@@ -111,7 +117,8 @@ function mapBackendPermissions(backendPerms: string[]): Permission[] {
   frontendPerms.add("sprint:view");
   frontendPerms.add("submit:view");
   frontendPerms.add("change:view");
-  
+  frontendPerms.add("ticket:view");
+
   return Array.from(frontendPerms);
 }
 
@@ -129,6 +136,7 @@ export const ALL_PERMISSIONS: Permission[] = [
   "change:create", "change:approve", "change:view",
   "dep:manage",
   "sys:user", "sys:audit", "sys:config", "sys:setting", "sys:gear",
+  "ticket:create", "ticket:triage", "ticket:view",
 ];
 
 // 角色对应的默认权限（作为后端接口失败时的回退）
@@ -144,6 +152,7 @@ const rolePermissionsFallback: Record<RoleType, Permission[]> = {
     "sprint:create", "sprint:edit", "sprint:view",
     "change:create", "change:view",
     "submit:create", "submit:view",
+    "ticket:create", "ticket:triage", "ticket:view",
   ],
   developer: [
     "req:view",
@@ -151,6 +160,7 @@ const rolePermissionsFallback: Record<RoleType, Permission[]> = {
     "bug:create", "bug:fix", "bug:view",
     "tc:create", "tc:view",
     "debt:create", "debt:view",
+    "ticket:create", "ticket:view",
   ],
   qa: [
     "req:view",
@@ -161,17 +171,14 @@ const rolePermissionsFallback: Record<RoleType, Permission[]> = {
     "sprint:view",
     "change:approve", "change:view",
     "submit:approve", "submit:view",
-  ],
-  project_manager: [
-    "req:view", "task:view", "bug:view", "tc:create", "tc:view",
-    "proj:create", "proj:edit", "proj:member", "proj:view",
-    "sprint:create", "sprint:edit", "sprint:view",
+    "ticket:create", "ticket:view",
   ],
 };
 
 // 全量菜单定义
 const allMenuItems: NavMenuItem[] = [
   { key: "dashboard", label: "工作台", path: "/app/dashboard", icon: "LayoutDashboard" },
+  { key: "tickets", label: "工单管理", path: "/app/tickets", icon: "Ticket" },
   { key: "projects", label: "项目管理", path: "/app/projects", icon: "FolderKanban" },
   { key: "requirements", label: "需求管理", path: "/app/requirements", icon: "FileText" },
   { key: "sprints", label: "迭代管理", path: "/app/sprints", icon: "Layers" },
@@ -182,6 +189,7 @@ const allMenuItems: NavMenuItem[] = [
   { key: "debt", label: "技术债务", path: "/app/debt", icon: "AlertTriangle" },
   { key: "changes", label: "变更管理", path: "/app/changes", icon: "GitBranch" },
   { key: "metrics", label: "效能度量", path: "/app/metrics", icon: "BarChart3" },
+  { key: "governance", label: "责任看板", path: "/app/governance", icon: "Radar" },
   { key: "knowledge", label: "知识库", path: "/app/knowledge", icon: "BookOpen" },
   { key: "audit", label: "审计日志", path: "/app/audit", icon: "Shield" },
   { key: "settings", label: "系统管理", path: "/app/settings", icon: "Settings" },
@@ -241,7 +249,6 @@ export const roleInfo: Record<RoleType, { label: string; name: string; avatar: s
   pm: { label: "产品经理", name: "张三", avatar: "张", color: "#ec4899" },
   developer: { label: "开发人员", name: "王五", avatar: "王", color: "#22c55e" },
   qa: { label: "测试人员", name: "赵六", avatar: "赵", color: "#f59e0b" },
-  project_manager: { label: "项目经理", name: "项目经理", avatar: "项", color: "#3b82f6" },
 };
 
 // 顶部快捷操作按钮定义
@@ -268,9 +275,6 @@ const roleQuickActions: Record<RoleType, QuickAction[]> = {
   qa: [
     { label: "新建用例", icon: "FileCheck", path: "/app/testing" },
     { label: "提交Bug", icon: "Bug", path: "/app/bugs" },
-  ],
-  project_manager: [
-    { label: "项目管理", icon: "FolderKanban", path: "/app/projects" },
   ],
 };
 
@@ -320,8 +324,9 @@ export function RoleProvider({ children }: { children: ReactNode }) {
       const backendPerms: string[] = data.permissions || [];
       const roles: string[] = data.roles || [];
       
-      // 确定当前角色
-      const currentRole = (roles[0] || "developer") as RoleType;
+      // 确定当前角色（后端开发角色码为 "dev"，前端统一规范为 "developer"）
+      const rawRole = roles[0] || "developer";
+      const currentRole: RoleType = rawRole === "dev" ? "developer" : (rawRole as RoleType);
       
       // 系统管理员拥有所有权限
       if (currentRole === "sys_admin") {

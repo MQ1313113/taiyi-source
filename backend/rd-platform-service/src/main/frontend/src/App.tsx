@@ -10,6 +10,7 @@ import { ProjectProvider } from "./contexts/ProjectContext";
 
 // Lazy load all pages
 const LoginPage = lazy(() => import("./pages/LoginPage"));
+const ChangePasswordPage = lazy(() => import("./pages/ChangePasswordPage"));
 const DashboardLayout = lazy(() => import("./components/layout/DashboardLayout"));
 const DeveloperDashboard = lazy(() => import("./pages/dashboards/DeveloperDashboard"));
 const ProductManagerDashboard = lazy(() => import("./pages/dashboards/ProductManagerDashboard"));
@@ -38,6 +39,9 @@ const SubmitTestList = lazy(() => import("./pages/submit-test/SubmitTestList"));
 const ChangeRequestList = lazy(() => import("./pages/changes/ChangeRequestList"));
 const AuditLogList = lazy(() => import("./pages/audit/AuditLogList"));
 const DependencyList = lazy(() => import("./pages/dependencies/DependencyList"));
+const TicketList = lazy(() => import("./pages/tickets/TicketList"));
+const TicketDetail = lazy(() => import("./pages/tickets/TicketDetail"));
+const GovernancePage = lazy(() => import("./pages/governance/GovernancePage"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 
 function LoadingFallback() {
@@ -92,6 +96,9 @@ function AppRoutes() {
           <Route path="/app/changes" component={ChangeRequestList} />
           <Route path="/app/audit" component={AuditLogList} />
           <Route path="/app/dependencies" component={DependencyList} />
+          <Route path="/app/tickets" component={TicketList} />
+          <Route path="/app/tickets/:id" component={TicketDetail} />
+          <Route path="/app/governance" component={GovernancePage} />
           <Route path="/app/settings" component={SettingsPage} />
           <Route path="/404" component={NotFound} />
           <Route component={NotFound} />
@@ -107,6 +114,7 @@ function Router() {
       <Switch>
         <Route path="/" component={LoginPage} />
         <Route path="/login" component={LoginPage} />
+        <Route path="/app/change-password" component={ChangePasswordPage} />
         <Route path="/app/*" component={AppRoutes} />
         <Route component={NotFound} />
       </Switch>

@@ -71,6 +71,12 @@ export default function LoginPage() {
         localStorage.setItem('taiyi_user', JSON.stringify(res.data));
         localStorage.setItem('taiyi_role', detectedRole);
         setRole(detectedRole);
+        // 首次登录或被管理员重置密码 → 强制先改密，改密成功前不进系统
+        if (res.data.isFirstLogin === 1) {
+          toast.info("首次登录", { description: "为保障安全，请先修改初始密码" });
+          setTimeout(() => setLocation("/app/change-password"), 300);
+          return;
+        }
         toast.success("登录成功", { description: `欢迎回来，${res.data.nickname || username}` });
         setTimeout(() => setLocation(getDashboardPath(detectedRole)), 300);
       } else {

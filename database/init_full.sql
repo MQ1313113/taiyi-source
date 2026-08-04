@@ -45,8 +45,10 @@ CREATE TABLE `biz_bug` (
   `confirmed_at` datetime DEFAULT NULL COMMENT '确认时间',
   `fixed_at` datetime DEFAULT NULL COMMENT '修复时间',
   `closed_at` datetime DEFAULT NULL COMMENT '关闭时间',
+  `source_ticket_id` bigint DEFAULT NULL COMMENT '来源工单ID(追溯)',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `version` int NOT NULL DEFAULT '1' COMMENT '版本号(乐观锁)',
   `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   KEY `idx_project_sprint` (`project_id`,`sprint_id`),
@@ -104,6 +106,80 @@ UNLOCK TABLES;
 --
 -- Table structure for table `biz_dependency`
 --
+
+DROP TABLE IF EXISTS `biz_assignment_log`;
+CREATE TABLE `biz_assignment_log` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `entity_type` varchar(24) NOT NULL COMMENT '实体类型(TASK/BUG/TICKET)',
+  `entity_id` bigint NOT NULL COMMENT '实体ID',
+  `project_id` bigint DEFAULT NULL COMMENT '项目ID',
+  `from_user_id` bigint DEFAULT NULL COMMENT '原负责人ID',
+  `to_user_id` bigint DEFAULT NULL COMMENT '新负责人ID',
+  `operator_id` bigint DEFAULT NULL COMMENT '操作人ID',
+  `reason` varchar(512) DEFAULT NULL COMMENT '转派原因',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_entity` (`entity_type`,`entity_id`),
+  KEY `idx_from` (`from_user_id`),
+  KEY `idx_to` (`to_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='转派/流转留痕';
+
+DROP TABLE IF EXISTS `biz_rework_log`;
+CREATE TABLE `biz_rework_log` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `entity_type` varchar(24) NOT NULL COMMENT '实体类型(REQUIREMENT/TASK/BUG/SUBMIT_TEST/CHANGE)',
+  `entity_id` bigint NOT NULL COMMENT '实体ID',
+  `project_id` bigint DEFAULT NULL COMMENT '项目ID',
+  `from_status` varchar(32) DEFAULT NULL COMMENT '打回前状态',
+  `to_status` varchar(32) DEFAULT NULL COMMENT '打回后状态',
+  `category` varchar(24) NOT NULL COMMENT '归因类别(REQ_UNCLEAR/DEV_POOR/TEST_MISS/OTHER)',
+  `reason` varchar(512) DEFAULT NULL COMMENT '原因',
+  `attributed_user_id` bigint DEFAULT NULL COMMENT '责任方用户ID',
+  `operator_id` bigint DEFAULT NULL COMMENT '操作人ID',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_attributed` (`attributed_user_id`),
+  KEY `idx_project` (`project_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='打回/返工归因日志';
+
+DROP TABLE IF EXISTS `biz_ticket`;
+CREATE TABLE `biz_ticket` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `ticket_code` varchar(32) NOT NULL COMMENT '工单编号',
+  `source` varchar(16) NOT NULL COMMENT '来源(SALES/SUPPORT/CUSTOMER/PRODUCT/INTERNAL)',
+  `category` varchar(16) NOT NULL COMMENT '类型(BUG/REQUIREMENT/AFTERSALES/OTHER)',
+  `title` varchar(256) NOT NULL COMMENT '标题',
+  `description` text COMMENT '描述',
+  `priority` varchar(8) NOT NULL DEFAULT 'P2' COMMENT '优先级(P0/P1/P2/P3)',
+  `project_id` bigint DEFAULT NULL COMMENT '项目ID(分诊时补)',
+  `reporter_id` bigint NOT NULL COMMENT '提报人ID',
+  `assignee_id` bigint DEFAULT NULL COMMENT '责任人ID',
+  `status` varchar(32) NOT NULL DEFAULT 'PENDING_TRIAGE' COMMENT '状态',
+  `converted_type` varchar(16) DEFAULT NULL COMMENT '转换目标类型(REQUIREMENT/BUG/TASK)',
+  `converted_id` bigint DEFAULT NULL COMMENT '转换目标ID',
+  `sla_due_at` datetime DEFAULT NULL COMMENT 'SLA截止时间',
+  `escalated_level` int NOT NULL DEFAULT '0' COMMENT '升级级别(0未升/1责任人/2项目负责人/3管理员)',
+  `resolved_at` datetime DEFAULT NULL COMMENT '解决时间',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_status` (`status`),
+  KEY `idx_assignee` (`assignee_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='工单(统一问题入口)';
+
+DROP TABLE IF EXISTS `biz_ticket_routing`;
+CREATE TABLE `biz_ticket_routing` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `category` varchar(16) NOT NULL COMMENT '匹配类型',
+  `project_id` bigint DEFAULT NULL COMMENT '项目ID(可空,填了则更优先)',
+  `owner_id` bigint NOT NULL COMMENT '默认负责人ID',
+  `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '是否启用',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_category` (`category`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='工单路由/责任规则';
 
 DROP TABLE IF EXISTS `biz_dependency`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -327,6 +403,7 @@ CREATE TABLE `biz_requirement` (
   `is_fast_track` tinyint NOT NULL DEFAULT '0' COMMENT '是否快速通道(0:否 1:是)',
   `fast_track_expire_time` datetime DEFAULT NULL COMMENT '快速通道过期时间(48h)',
   `fast_track_violated` tinyint NOT NULL DEFAULT '0' COMMENT '快速通道是否违规(0:否 1:是)',
+  `source_ticket_id` bigint DEFAULT NULL COMMENT '来源工单ID(追溯)',
   `version` int NOT NULL DEFAULT '1' COMMENT '版本号',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -432,6 +509,7 @@ CREATE TABLE `biz_submit_test` (
   `reject_reason` text COMMENT '驳回原因',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `version` int NOT NULL DEFAULT '1' COMMENT '版本号(乐观锁)',
   PRIMARY KEY (`id`),
   KEY `idx_requirement_id` (`requirement_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='提测单表';
@@ -470,8 +548,10 @@ CREATE TABLE `biz_task` (
   `start_date` date DEFAULT NULL COMMENT '开始日期',
   `due_date` date NOT NULL COMMENT '截止日期',
   `completed_at` datetime DEFAULT NULL COMMENT '完成时间',
+  `source_ticket_id` bigint DEFAULT NULL COMMENT '来源工单ID(追溯)',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `version` int NOT NULL DEFAULT '1' COMMENT '版本号(乐观锁)',
   `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   KEY `idx_requirement_id` (`requirement_id`),

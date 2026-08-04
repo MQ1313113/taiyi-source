@@ -1,12 +1,15 @@
 package com.rd.platform.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.rd.platform.common.exception.BusinessException;
 import com.rd.platform.model.entity.BizNotification;
 import com.rd.platform.model.entity.BizNotificationDelivery;
 import com.rd.platform.model.entity.SysUserNotificationSetting;
 import com.rd.platform.model.mapper.BizNotificationDeliveryMapper;
 import com.rd.platform.model.mapper.BizNotificationMapper;
 import com.rd.platform.model.mapper.SysUserNotificationSettingMapper;
+import com.rd.platform.security.context.SecurityContextHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.*;
@@ -240,5 +243,49 @@ public class NotificationService {
                    .replace("\n", "\\n")
                    .replace("\r", "\\r")
                    .replace("\t", "\\t");
+    }
+
+    // ============ 站内信收件箱（从 NotificationController 下沉） ============
+
+    public Page<BizNotification> list(Integer pageNum, Integer pageSize, Boolean unreadOnly) {
+        Long userId = SecurityContextHolder.getCurrentUserId();
+        Page<BizNotification> page = new Page<>(pageNum, pageSize);
+        LambdaQueryWrapper<BizNotification> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(BizNotification::getUserId, userId);
+        if (Boolean.TRUE.equals(unreadOnly)) {
+            wrapper.eq(BizNotification::getIsRead, 0);
+        }
+        wrapper.orderByDesc(BizNotification::getCreatedAt);
+        return notificationMapper.selectPage(page, wrapper);
+    }
+
+    public Map<String, Object> unreadCount() {
+        Long userId = SecurityContextHolder.getCurrentUserId();
+        Long count = notificationMapper.selectCount(
+                new LambdaQueryWrapper<BizNotification>()
+                        .eq(BizNotification::getUserId, userId)
+                        .eq(BizNotification::getIsRead, 0));
+        Map<String, Object> data = new HashMap<>();
+        data.put("count", count);
+        return data;
+    }
+
+    public void markAsRead(Long id) {
+        BizNotification notification = notificationMapper.selectById(id);
+        if (notification == null) throw BusinessException.badRequest("通知不存在");
+        notification.setIsRead(1);
+        notification.setReadAt(LocalDateTime.now());
+        notificationMapper.updateById(notification);
+    }
+
+    public void markAllAsRead() {
+        Long userId = SecurityContextHolder.getCurrentUserId();
+        BizNotification update = new BizNotification();
+        update.setIsRead(1);
+        update.setReadAt(LocalDateTime.now());
+        notificationMapper.update(update,
+                new LambdaQueryWrapper<BizNotification>()
+                        .eq(BizNotification::getUserId, userId)
+                        .eq(BizNotification::getIsRead, 0));
     }
 }

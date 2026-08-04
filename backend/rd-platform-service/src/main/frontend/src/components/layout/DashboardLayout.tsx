@@ -6,7 +6,7 @@ import {
   Bug, Bell, Settings, ChevronLeft, ChevronRight, Search,
   Plus, User, LogOut, Layers, BarChart3, Shield,
   AlertTriangle, BookOpen, Users, Clock, GitBranch,
-  Scissors, UserPlus, Play, FileCheck, ChevronDown
+  Scissors, UserPlus, Play, FileCheck, ChevronDown, Ticket, Radar
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,7 +27,7 @@ const iconMap: Record<string, React.ElementType> = {
   LayoutDashboard, FolderKanban, FileText, Code2, TestTube2,
   Bug, Bell, Settings, Layers, BarChart3, AlertTriangle,
   BookOpen, Users, Shield, Clock, GitBranch, Scissors,
-  UserPlus, Play, FileCheck, Plus
+  UserPlus, Play, FileCheck, Plus, Ticket, Radar
 };
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {

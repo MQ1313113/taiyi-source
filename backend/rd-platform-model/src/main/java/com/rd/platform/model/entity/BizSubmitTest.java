@@ -23,4 +23,6 @@ public class BizSubmitTest implements Serializable {
     private String rejectReason;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    @Version
+    private Integer version;
 }

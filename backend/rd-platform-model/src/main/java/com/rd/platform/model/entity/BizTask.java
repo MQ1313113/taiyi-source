@@ -30,8 +30,11 @@ public class BizTask implements Serializable {
     private String type;
     private String acceptanceCriteria;
     private LocalDateTime completedAt;
+    private Long sourceTicketId; // 来源工单ID（追溯）
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    @Version
+    private Integer version;
     @TableLogic
     private Integer deleted;
 }

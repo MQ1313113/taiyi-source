@@ -196,7 +196,7 @@ export default function RequirementDetail() {
     REVIEWING: ["pm", "sys_admin"],            // 提交评审
     APPROVED: ["pm", "sys_admin"], // 评审通过
     REJECTED: ["pm", "sys_admin"], // 评审驳回
-    DEVELOPED: ["developer", "dev", "sys_admin"], // 标记开发完成
+    DEVELOPED: ["developer", "sys_admin"], // 标记开发完成
     TESTED: ["qa", "sys_admin"],               // 测试通过
     RELEASING: ["pm", "sys_admin"], // 进入发布
     CLOSED: ["pm", "sys_admin"],    // 验收上线

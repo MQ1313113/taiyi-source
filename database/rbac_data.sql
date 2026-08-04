@@ -65,3 +65,25 @@ UNLOCK TABLES;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
 -- Dump completed on 2026-07-17  8:15:19
+
+-- ============================================================
+-- 清理：移除空壳角色 project_manager（无操作权限、无用户挂靠，职能与 pm 重复）
+-- 幂等，可安全重复执行。
+-- ============================================================
+DELETE FROM `sys_role_permission` WHERE `role_id` = 6;
+DELETE FROM `sys_user_role` WHERE `role_id` = 6;
+DELETE FROM `sys_role` WHERE `role_code` = 'project_manager';
+
+-- ============================================================
+-- 工单(统一问题入口)权限种子。与 system-data/*.json 保持一致；
+-- 启动时 SystemDataInitializer 以 JSON 为权威同步,本段仅首次建库用。
+-- ============================================================
+INSERT INTO `sys_permission` (`id`,`parent_id`,`permission_code`,`permission_name`,`type`,`path`,`icon`,`sort_order`,`status`,`created_at`) VALUES
+ (43,0,'ticket','工单管理',1,'/ticket','CustomerServiceOutlined',14,1,NOW()),
+ (44,43,'ticket:create','提交工单',2,NULL,NULL,1,1,NOW()),
+ (45,43,'ticket:triage','分诊工单',2,NULL,NULL,2,1,NOW());
+INSERT INTO `sys_role_permission` (`id`,`role_id`,`permission_id`,`created_at`) VALUES
+ (156,1,43,NOW()),(157,1,44,NOW()),(158,1,45,NOW()),
+ (159,2,43,NOW()),(160,2,44,NOW()),(161,2,45,NOW()),
+ (162,4,43,NOW()),(163,4,44,NOW()),
+ (164,5,43,NOW()),(165,5,44,NOW());

@@ -32,6 +32,8 @@ public class BizRequirement implements Serializable {
     private Integer isFastTrack;
     private LocalDateTime fastTrackExpireTime;
     private Integer fastTrackViolated;
+    private Long sourceTicketId; // 来源工单ID（由工单分诊转换而来时回填，用于追溯）
+    @Version
     private Integer version;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

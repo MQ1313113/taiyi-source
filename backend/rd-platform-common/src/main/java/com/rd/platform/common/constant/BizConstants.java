@@ -68,4 +68,40 @@ public class BizConstants {
     public static final String NOTIFY_STATUS_CHANGE = "STATUS_CHANGE";
     public static final String NOTIFY_WARNING = "WARNING";
     public static final String NOTIFY_SYSTEM = "SYSTEM";
+
+    // 工单状态
+    public static final String TICKET_PENDING_TRIAGE = "PENDING_TRIAGE"; // 待分诊
+    public static final String TICKET_DISPATCHED = "DISPATCHED";         // 已转派
+    public static final String TICKET_PROCESSING = "PROCESSING";         // 处理中
+    public static final String TICKET_RESOLVED = "RESOLVED";             // 已解决
+    public static final String TICKET_CLOSED = "CLOSED";                 // 已关闭
+
+    // 工单类型（决定分诊可转换的目标）
+    public static final String TICKET_CAT_BUG = "BUG";
+    public static final String TICKET_CAT_REQUIREMENT = "REQUIREMENT";
+    public static final String TICKET_CAT_AFTERSALES = "AFTERSALES";
+    public static final String TICKET_CAT_OTHER = "OTHER";
+
+    // 工单转换目标类型
+    public static final String TICKET_CONV_REQUIREMENT = "REQUIREMENT";
+    public static final String TICKET_CONV_BUG = "BUG";
+    public static final String TICKET_CONV_TASK = "TASK";
+
+    // 打回/返工归因类别
+    public static final String REWORK_REQ_UNCLEAR = "REQ_UNCLEAR"; // 需求没写清
+    public static final String REWORK_DEV_POOR = "DEV_POOR";       // 开发没做好
+    public static final String REWORK_TEST_MISS = "TEST_MISS";     // 测试没测到
+    public static final String REWORK_OTHER = "OTHER";
+
+    // 打回归因实体类型
+    public static final String REWORK_ENTITY_REQUIREMENT = "REQUIREMENT";
+    public static final String REWORK_ENTITY_TASK = "TASK";
+    public static final String REWORK_ENTITY_BUG = "BUG";
+    public static final String REWORK_ENTITY_SUBMIT_TEST = "SUBMIT_TEST";
+    public static final String REWORK_ENTITY_CHANGE = "CHANGE";
+
+    // 转派留痕实体类型
+    public static final String ASSIGN_ENTITY_TASK = "TASK";
+    public static final String ASSIGN_ENTITY_BUG = "BUG";
+    public static final String ASSIGN_ENTITY_TICKET = "TICKET";
 }

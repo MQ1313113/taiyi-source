@@ -40,5 +40,8 @@
   {"id": 39, "parentId": 2, "permissionCode": "sprint:edit", "permissionName": "编辑迭代", "type": 2, "path": null, "icon": null, "sortOrder": 6},
   {"id": 40, "parentId": 12, "permissionCode": "system:manage", "permissionName": "系统管理操作", "type": 2, "path": null, "icon": null, "sortOrder": 1},
   {"id": 41, "parentId": 0, "permissionCode": "bug:confirm", "permissionName": "确认/拒绝缺陷", "type": 2, "path": null, "icon": null, "sortOrder": 45},
-  {"id": 42, "parentId": 0, "permissionCode": "submit:approve", "permissionName": "审批提测单", "type": 2, "path": null, "icon": null, "sortOrder": 0}
+  {"id": 42, "parentId": 0, "permissionCode": "submit:approve", "permissionName": "审批提测单", "type": 2, "path": null, "icon": null, "sortOrder": 0},
+  {"id": 43, "parentId": 0, "permissionCode": "ticket", "permissionName": "工单管理", "type": 1, "path": "/ticket", "icon": "CustomerServiceOutlined", "sortOrder": 14},
+  {"id": 44, "parentId": 43, "permissionCode": "ticket:create", "permissionName": "提交工单", "type": 2, "path": null, "icon": null, "sortOrder": 1},
+  {"id": 45, "parentId": 43, "permissionCode": "ticket:triage", "permissionName": "分诊工单", "type": 2, "path": null, "icon": null, "sortOrder": 2}
 ]

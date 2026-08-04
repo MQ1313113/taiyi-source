@@ -10,7 +10,8 @@
     "change:create", "change:approve",
     "project:create", "project:edit", "project:delete", "project:manage_member",
     "sprint:create", "sprint:edit",
-    "system:manage", "submit:approve"
+    "system:manage", "submit:approve",
+    "ticket", "ticket:create", "ticket:triage"
   ],
   "pm": [
     "dashboard", "project", "requirement", "task", "submit_test", "bug", "testing",
@@ -23,14 +24,16 @@
     "change:create", "change:approve",
     "project:create", "project:edit", "project:manage_member",
     "sprint:create", "sprint:edit",
-    "submit:approve"
+    "submit:approve",
+    "ticket", "ticket:create", "ticket:triage"
   ],
   "dev": [
     "dashboard", "task", "submit_test", "bug", "testing", "debt", "knowledge", "notification",
     "requirement:dev_progress",
     "task:dev_progress",
     "testcase:create",
-    "bug:create", "bug:edit"
+    "bug:create", "bug:edit",
+    "ticket", "ticket:create"
   ],
   "qa": [
     "dashboard", "submit_test", "bug", "testing", "knowledge", "notification",
@@ -38,10 +41,7 @@
     "task:test_verify",
     "testcase:create", "testcase:approve",
     "bug:create", "bug:edit", "bug:close", "bug:confirm",
-    "submit:approve"
-  ],
-  "project_manager": [
-    "dashboard", "project", "testing", "knowledge", "notification",
-    "testcase:create"
+    "submit:approve",
+    "ticket", "ticket:create"
   ]
 }

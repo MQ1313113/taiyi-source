@@ -231,6 +231,7 @@ export const userApi = {
   create: (data: any) => api.post('/users', data),
   update: (id: number, data: any) => api.put(`/users/${id}`, data),
   resetPassword: (id: number, newPassword: string) => api.put(`/users/${id}/password`, { newPassword }),
+  changePassword: (data: { oldPassword: string; newPassword: string }) => api.put('/users/change-password', data),
   toggleStatus: (id: number) => api.put(`/users/${id}/toggle-status`),
   delete: (id: number) => api.delete(`/users/${id}`),
 };
@@ -254,6 +255,7 @@ export const metricsApi = {
   getBurndown: (sprintId: number) => api.get(`/metrics/sprint/${sprintId}/burndown`),
   getVelocity: (projectId: number) => api.get(`/metrics/project/${projectId}`),
   getQuality: (projectId: number) => api.get(`/metrics/project/${projectId}`),
+  bugTrend: (params?: any) => api.get("/metrics/bug-trend", { params }),
 };
 
 export const sprintApi = {
@@ -264,6 +266,26 @@ export const sprintApi = {
   delete: (id: number) => api.delete(`/sprints/${id}`),
   start: (id: number) => api.put(`/sprints/${id}/start`),
   complete: (id: number) => api.put(`/sprints/${id}/complete`),
+  capacity: (id: number) => api.get(`/sprints/${id}/capacity`),
+};
+
+// ============ 治理看板（责任雷达 + 健康度画像）============
+export const governanceApi = {
+  radar: () => api.get("/governance/radar"),
+  portrait: (params?: any) => api.get("/governance/portrait", { params }),
+  flow: (entityType: string, entityId: number) => api.get("/governance/flow", { params: { entityType, entityId } }),
+};
+
+// ============ 工单（统一问题入口）============
+export const ticketApi = {
+  list: (params?: any) => api.get("/tickets", { params }),
+  detail: (id: number) => api.get(`/tickets/${id}`),
+  create: (data: any) => api.post("/tickets", data),
+  triage: (id: number, data: any) => api.put(`/tickets/${id}/triage`, data),
+  changeStatus: (id: number, data: any) => api.put(`/tickets/${id}/status`, data),
+  routingList: () => api.get("/tickets/routing"),
+  routingCreate: (data: any) => api.post("/tickets/routing", data),
+  routingDelete: (id: number) => api.delete(`/tickets/routing/${id}`),
 };
 
 // ============ System Config ============

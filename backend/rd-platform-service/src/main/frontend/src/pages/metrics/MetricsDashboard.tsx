@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { metricsApi, projectApi, sprintApi, userApi } from "@/services/api";
 import { useRole } from "@/contexts/RoleContext";
 import { ShieldAlert } from "lucide-react";
+import { ResponsiveContainer, ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
 
 const ROLE_LABELS: Record<string, string> = {
   sys_admin: "系统管理员",
@@ -61,6 +62,15 @@ export default function MetricsDashboard() {
   const [overview, setOverview] = useState<OverviewData | null>(null);
   const [workload, setWorkload] = useState<WorkloadRow[]>([]);
   const [burndown, setBurndown] = useState<BurndownData | null>(null);
+  const [bugTrend, setBugTrend] = useState<any[]>([]);
+
+  // 缺陷趋势（近30天，真实数据）
+  useEffect(() => {
+    if (!allowed || !projectId) { setBugTrend([]); return; }
+    metricsApi.bugTrend({ projectId: Number(projectId), days: 30 })
+      .then((res: any) => setBugTrend(res.data || []))
+      .catch(() => setBugTrend([]));
+  }, [projectId, allowed]);
 
   // Load project list once
   useEffect(() => {
@@ -277,6 +287,30 @@ export default function MetricsDashboard() {
               <p className="text-sm text-muted-foreground py-6 text-center">当前迭代「{burndown.sprintName}」暂未关联任务</p>
             ) : (
               <p className="text-sm text-muted-foreground py-6 text-center">该项目暂无迭代数据</p>
+            )}
+          </motion.div>
+
+          {/* 缺陷趋势 - 真实数据（近30天，来自 /metrics/bug-trend） */}
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
+            className="bg-white rounded-xl border border-border/60 p-6">
+            <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-[#0088ff]" /> 缺陷趋势（近 30 天）
+            </h3>
+            {bugTrend.length > 0 ? (
+              <ResponsiveContainer width="100%" height={240}>
+                <ComposedChart data={bugTrend} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(d: string) => d.slice(5)} minTickGap={24} />
+                  <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+                  <Tooltip />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Area type="monotone" dataKey="open" name="未关闭" stroke="#f59e0b" fill="#f59e0b22" />
+                  <Line type="monotone" dataKey="created" name="新增" stroke="#ef4444" dot={false} strokeWidth={2} />
+                  <Line type="monotone" dataKey="closed" name="关闭" stroke="#10b981" dot={false} strokeWidth={2} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-sm text-muted-foreground py-6 text-center">该项目近 30 天暂无缺陷数据</p>
             )}
           </motion.div>
 

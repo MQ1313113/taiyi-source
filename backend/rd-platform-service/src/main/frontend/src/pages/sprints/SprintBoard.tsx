@@ -1,7 +1,7 @@
 import { useRole } from "@/contexts/RoleContext";
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Layers, Plus, Calendar, Target, Users, Play, CheckCircle2 } from "lucide-react";
+import { Layers, Plus, Calendar, Target, Users, Play, CheckCircle2, Gauge, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -27,6 +27,23 @@ export default function SprintBoard() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ name: "", goal: "", startDate: "", endDate: "" });
   const [projectId, setProjectId] = useState<number>(0);
+  // 成员负载：按迭代缓存 /sprints/{id}/capacity 结果，点击展开
+  const [loads, setLoads] = useState<Record<number, any[]>>({});
+  const [expandedLoad, setExpandedLoad] = useState<number | null>(null);
+  const [loadingLoad, setLoadingLoad] = useState<number | null>(null);
+
+  const toggleLoad = (sprintId: number) => {
+    if (expandedLoad === sprintId) { setExpandedLoad(null); return; }
+    setExpandedLoad(sprintId);
+    if (!loads[sprintId]) {
+      setLoadingLoad(sprintId);
+      sprintApi.capacity(sprintId).then((res: any) => {
+        setLoads((prev) => ({ ...prev, [sprintId]: res.data || [] }));
+      }).catch(() => {
+        setLoads((prev) => ({ ...prev, [sprintId]: [] }));
+      }).finally(() => setLoadingLoad(null));
+    }
+  };
 
   // 动态获取项目ID
   useEffect(() => {
@@ -108,13 +125,17 @@ export default function SprintBoard() {
                   <p className="text-sm text-muted-foreground mt-1">{sprint.goal}</p>
                 </div>
                 <div className="flex gap-2">
-                  {hasPermission("sprint:manage") && sprint.status === "PLANNING" && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs text-[#0088ff] border-[#0088ff]/30"
+                    onClick={() => toggleLoad(sprint.id)}>
+                    <Gauge className="w-3 h-3 mr-1" />{expandedLoad === sprint.id ? "收起负载" : "成员负载"}
+                  </Button>
+                  {hasPermission("sprint:edit") && sprint.status === "PLANNING" && (
                     <Button size="sm" variant="outline" className="h-7 text-xs text-[#0088ff] border-[#0088ff]/30"
                       onClick={() => { sprintApi.start(sprint.id).then(() => { toast.success("迭代已启动"); fetchSprints(); }).catch((e: any) => toast.error(e?.message || "启动失败")); }}>
                       <Play className="w-3 h-3 mr-1" />启动
                     </Button>
                   )}
-                  {hasPermission("sprint:manage") && (sprint.status === "ACTIVE" || sprint.status === "IN_PROGRESS") && (
+                  {hasPermission("sprint:edit") && (sprint.status === "ACTIVE" || sprint.status === "IN_PROGRESS") && (
                     <Button size="sm" variant="outline" className="h-7 text-xs text-green-600 border-green-300"
                       onClick={() => { sprintApi.complete(sprint.id).then(() => { toast.success("迭代已完成"); fetchSprints(); }).catch((e: any) => toast.error(e?.message || "完成失败")); }}>
                       <CheckCircle2 className="w-3 h-3 mr-1" />完成
@@ -141,6 +162,51 @@ export default function SprintBoard() {
                   <span className="text-xs font-medium">{progress}%</span>
                 </div>
               </div>
+
+              {/* 成员负载面板 */}
+              {expandedLoad === sprint.id && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}
+                  className="mt-4 pt-4 border-t border-border/60">
+                  <div className="flex items-center gap-2 mb-3 text-sm font-medium text-muted-foreground">
+                    <Gauge className="w-4 h-4" /> 成员负载（容量 = 迭代工作日 × 6h/人·天）
+                  </div>
+                  {loadingLoad === sprint.id ? (
+                    <p className="text-sm text-muted-foreground">加载中…</p>
+                  ) : (loads[sprint.id] && loads[sprint.id].length > 0) ? (
+                    <div className="space-y-3">
+                      {loads[sprint.id].map((m: any) => {
+                        const cap = m.capacityHours || 0;
+                        const planned = m.plannedHours || 0;
+                        const ratio = cap > 0 ? Math.round((planned / cap) * 100) : 0;
+                        const over = m.overloaded;
+                        return (
+                          <div key={m.userId} className="flex items-center gap-3">
+                            <div className="w-28 shrink-0 text-sm truncate">
+                              {m.nickname || `用户#${m.userId}`}
+                              <span className="text-[10px] text-muted-foreground ml-1">{m.roleCode}</span>
+                            </div>
+                            <div className="flex-1 h-2.5 rounded-full bg-muted overflow-hidden">
+                              <div className={`h-full rounded-full ${over ? "bg-red-500" : ratio >= 80 ? "bg-amber-500" : "bg-[#0088ff]"}`}
+                                style={{ width: `${Math.min(100, ratio)}%` }} />
+                            </div>
+                            <div className="w-32 shrink-0 text-right text-xs">
+                              <span className={over ? "text-red-600 font-medium" : ""}>{planned.toFixed(1)}h</span>
+                              <span className="text-muted-foreground"> / {cap.toFixed(1)}h</span>
+                            </div>
+                            {over && (
+                              <Badge className="bg-red-50 text-red-600 text-[10px] gap-0.5">
+                                <AlertTriangle className="w-3 h-3" />超载
+                              </Badge>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">该迭代暂无项目成员或负载数据。为成员分派任务后即可看到负载分布。</p>
+                  )}
+                </motion.div>
+              )}
             </motion.div>
           );
         })}

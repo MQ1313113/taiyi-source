@@ -126,6 +126,8 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-resources-plugin</artifactId>
+                <!-- 必须 ≥3.1.0:copy-resources 的 skip 参数 3.1.0 才引入,默认解析的 2.6 会静默忽略它 -->
+                <version>3.2.0</version>
                 <executions>
                     <execution>
                         <id>copy-frontend-dist</id>

@@ -3,9 +3,11 @@ package com.rd.platform.service.impl;
 import com.rd.platform.common.exception.BusinessException;
 import com.rd.platform.model.entity.BizSprint;
 import com.rd.platform.model.entity.BizTask;
+import com.rd.platform.model.entity.BizTechDebt;
 import com.rd.platform.model.mapper.BizProjectMemberMapper;
 import com.rd.platform.model.mapper.BizSprintMapper;
 import com.rd.platform.model.mapper.BizTaskMapper;
+import com.rd.platform.model.mapper.BizTechDebtMapper;
 import com.rd.platform.model.mapper.SysUserMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,6 +32,8 @@ class SprintCapacityGuardTest {
     @Mock BizTaskMapper taskMapper;
     @Mock BizProjectMemberMapper memberMapper;
     @Mock SysUserMapper userMapper;
+    // plannedHours 现在把已排期技术债也计入负载(债与需求抢同一容量池),必须提供该 mock,否则 @InjectMocks 后为 null 直接 NPE
+    @Mock BizTechDebtMapper techDebtMapper;
     @InjectMocks SprintCapacityGuard guard;
 
     private BizSprint week(LocalDate start, LocalDate end) {
@@ -53,11 +57,15 @@ class SprintCapacityGuardTest {
 
     @Test
     void assertWithinCapacity_throwsWhenOverloaded() {
-        // 5 工作日 = 30h 容量；已排 28h，再加 5h => 33h 超载
+        // 5 工作日 = 30h 容量；已排任务 20h + 已排期技术债 8h = 28h，再加 5h => 33h 超载。
+        // 债务工时计入负载是刻意覆盖点:债和需求抢同一个容量池
         when(sprintMapper.selectById(1L)).thenReturn(week(LocalDate.of(2026, 8, 3), LocalDate.of(2026, 8, 7)));
         BizTask t = new BizTask();
-        t.setEstimatedHours(new BigDecimal("28"));
+        t.setEstimatedHours(new BigDecimal("20"));
         when(taskMapper.selectList(any())).thenReturn(Arrays.asList(t));
+        BizTechDebt d = new BizTechDebt();
+        d.setEstimatedHours(new BigDecimal("8"));
+        when(techDebtMapper.selectList(any())).thenReturn(Arrays.asList(d));
         assertThrows(BusinessException.class,
                 () -> guard.assertWithinCapacity(1L, 2L, new BigDecimal("5")));
     }
@@ -66,6 +74,7 @@ class SprintCapacityGuardTest {
     void assertWithinCapacity_okWhenWithin() {
         when(sprintMapper.selectById(1L)).thenReturn(week(LocalDate.of(2026, 8, 3), LocalDate.of(2026, 8, 7)));
         when(taskMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(techDebtMapper.selectList(any())).thenReturn(Collections.emptyList());
         assertDoesNotThrow(() -> guard.assertWithinCapacity(1L, 2L, new BigDecimal("10")));
     }
 

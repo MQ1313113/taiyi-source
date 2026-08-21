@@ -3,10 +3,12 @@ import { useState, useEffect } from "react";
 import { useLocation, Link } from "wouter";
 import { motion } from "framer-motion";
 import { FileText, TrendingUp, Clock, CheckCircle2, BarChart3, Layers, Plus, ArrowRight, AlertTriangle, Eye, GitBranch } from "lucide-react";
-import { requirementApi, userApi } from "@/services/api";
+import { requirementApi, userApi, projectApi } from "@/services/api";
 import MyTodoPanel from "@/components/MyTodoPanel";
+import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ChangeRequestDialog } from "@/components/dialogs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import RequirementForm from "@/components/forms/RequirementForm";
@@ -17,13 +19,16 @@ export default function ProductManagerDashboard() {
   const [requirements, setRequirements] = useState<any[]>([]);
   const [userMap, setUserMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  // 项目筛选：跨项目混计的需求统计无意义
+  const [projects, setProjects] = useState<any[]>([]);
+  const [projectId, setProjectId] = useState<string>("");
 
   // Dialog states
   const [changeRequestOpen, setChangeRequestOpen] = useState(false);
   const [createReqOpen, setCreateReqOpen] = useState(false);
 
   const loadRequirements = () => {
-    requirementApi.list({ page: 1, size: 50 })
+    requirementApi.list({ pageNum: 1, pageSize: 200, projectId: projectId ? Number(projectId) : undefined })
       .then((res: any) => {
         const data = res.data?.records || res.data || [];
         setRequirements(data);
@@ -32,8 +37,15 @@ export default function ProductManagerDashboard() {
       .finally(() => setLoading(false));
   };
 
+  useEffect(() => { loadRequirements(); }, [projectId]);
+  // 自动刷新：定时轮询 + 收到通知立即刷新
+  useDashboardAutoRefresh(loadRequirements);
+
   useEffect(() => {
-    loadRequirements();
+    projectApi.list({ pageNum: 1, pageSize: 100 }).then((res: any) => {
+      const list = res?.data?.records || res?.data || [];
+      setProjects(Array.isArray(list) ? list : []);
+    }).catch(() => setProjects([]));
     // 加载用户映射表，用于将需求 ownerId 转为中文姓名（FE-WS-01）
     userApi.listWithRoles().then((res: any) => {
       const map: Record<string, string> = {};
@@ -109,6 +121,15 @@ export default function ProductManagerDashboard() {
           <p className="text-sm text-muted-foreground mt-1">万物归一，秩序自生 · 让每一次交付都值得信赖</p>
         </div>
         <div className="flex items-center gap-2">
+          <Select value={projectId || "all"} onValueChange={(v) => setProjectId(v === "all" ? "" : v)}>
+            <SelectTrigger className="h-8 w-40 text-xs rounded-xl"><SelectValue placeholder="全部项目" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部项目</SelectItem>
+              {projects.map((p: any) => (
+                <SelectItem key={p.id} value={String(p.id)}>{p.projectName || p.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button
             className="h-8 text-xs rounded-xl bg-[#0088ff] hover:bg-[#0066cc] text-white"
             onClick={() => setCreateReqOpen(true)}

@@ -30,6 +30,9 @@ public class TaskService {
     private BizTaskMapper taskMapper;
 
     @Autowired
+    private com.rd.platform.model.mapper.BizProjectMapper projectMapper;
+
+    @Autowired
     private NotificationService notificationService;
 
     @Autowired
@@ -49,6 +52,12 @@ public class TaskService {
 
     @Autowired
     private AssignmentLogRecorder assignmentLogRecorder;
+
+    @Autowired
+    private ConflictAdvisorService conflictAdvisorService;
+
+    @Autowired
+    private TicketService ticketService;
 
     public Page<BizTask> list(Integer pageNum, Integer pageSize, Long projectId, Long requirementId,
                               Long sprintId, Long assigneeId, String status, String keyword) {
@@ -81,9 +90,21 @@ public class TaskService {
         // Cross-check R2: Tech leader creates tasks, cannot assign to self only
         Long currentUserId = SecurityContextHolder.getCurrentUserId();
 
+        // 个人项目直通:本人给自己记任务(待办留痕),免拆解权限/需求关联/负责人角色/容量校验
+        boolean privateOwner = projectAccessGuard.isPrivateOwner(currentUserId, request.getProjectId());
+        if (privateOwner) {
+            request.setAssigneeId(currentUserId);
+            request.setSprintId(null);
+            request.setRequirementId(null);
+        }
         // 权限门禁(FP-TASK-02 / PRD 24.3)：只有产品经理可拆解任务，拦截开发/测试越权
-        if (!roleChecker.hasPermission(currentUserId, "task:create")) {
+        if (!privateOwner && !roleChecker.hasPermission(currentUserId, "task:create")) {
             throw BusinessException.forbidden("只有产品经理可以拆解任务");
+        }
+        // 团队项目:需求关联与验收标准仍为必填(从 DTO 注解下沉,因个人项目需豁免)
+        if (!privateOwner) {
+            if (request.getRequirementId() == null) throw BusinessException.badRequest("需求ID不能为空");
+            if (!StringUtils.hasText(request.getAcceptanceCriteria())) throw BusinessException.badRequest("验收标准不能为空");
         }
         // 仅该需求的负责人(产品经理)可拆解其名下需求的任务
         if (request.getRequirementId() != null) {
@@ -105,14 +126,19 @@ public class TaskService {
             }
         }
 
-        // 任务负责人角色校验(PRD 流程规范)：拆解后只能指派给开发人员
-        if (request.getAssigneeId() == null
-                || !roleChecker.hasPermission(request.getAssigneeId(), "task:dev_progress")) {
+        // 任务负责人角色校验(PRD 流程规范)：拆解后只能指派给开发人员(个人项目=本人,免校验)
+        if (!privateOwner && (request.getAssigneeId() == null
+                || !roleChecker.hasPermission(request.getAssigneeId(), "task:dev_progress"))) {
             throw BusinessException.badRequest("任务负责人必须指派给开发人员");
         }
         // 排期护栏：任务纳入迭代时，校验被指派人在该迭代不超载
         if (request.getSprintId() != null) {
             sprintCapacityGuard.assertWithinCapacity(request.getSprintId(), request.getAssigneeId(), request.getEstimatedHours());
+        }
+        // 冲突管控(conflict.enforce)：排期撞车时 warn 留痕放行 / block 拒绝保存并引导走变更(个人项目不参与)
+        if (!privateOwner) {
+            conflictAdvisorService.onTaskSave(request.getTaskName(), request.getAssigneeId(),
+                    request.getEstimatedHours(), request.getDueDate(), null);
         }
 
         BizTask task = new BizTask();
@@ -144,6 +170,28 @@ public class TaskService {
         return task;
     }
 
+    /**
+     * 单人项目任务"转报团队":发现的价值点(如组件该产品化)一键提报为需求类工单,
+     * 预填内容与来源留痕,走既有的 分诊→转需求→正式流程 链路;原任务保留作为留痕。
+     */
+    public com.rd.platform.model.entity.BizTicket promote(Long id) {
+        BizTask task = taskMapper.selectById(id);
+        if (task == null) throw BusinessException.badRequest("任务不存在");
+        Long uid = SecurityContextHolder.getCurrentUserId();
+        if (!projectAccessGuard.isPrivateOwner(uid, task.getProjectId())) {
+            throw BusinessException.badRequest("仅单人项目的任务可由负责人转报团队");
+        }
+        TicketService.TicketCreateRequest tr = new TicketService.TicketCreateRequest();
+        tr.setSource("INTERNAL");
+        tr.setCategory(BizConstants.TICKET_CAT_REQUIREMENT);
+        tr.setTitle("[单人项目转报] " + task.getTaskName());
+        tr.setDescription("来源:单人项目任务 #" + task.getId() + "\n\n" +
+                (task.getDescription() == null ? "" : task.getDescription()) +
+                "\n\n(由个人负责项目中验证有价值,提报转入团队正式流程)");
+        tr.setPriority(task.getPriority() != null ? task.getPriority() : BizConstants.PRIORITY_P2);
+        return ticketService.create(tr);
+    }
+
     public BizTask update(Long id, TaskCreateRequest request) {
         BizTask task = taskMapper.selectById(id);
         if (task == null) throw BusinessException.badRequest("任务不存在");
@@ -152,6 +200,10 @@ public class TaskService {
         if (!roleChecker.hasPermission(currentUserId, "task:edit")) {
             throw BusinessException.forbidden("只有产品经理可以编辑或分派任务");
         }
+        // 冲突管控：编辑改期/转派同样过检（排除任务自身的存量工时）
+        Long effectiveAssignee = request.getAssigneeId() != null ? request.getAssigneeId() : task.getAssigneeId();
+        conflictAdvisorService.onTaskSave(request.getTaskName(), effectiveAssignee,
+                request.getEstimatedHours(), request.getDueDate(), id);
         task.setTaskName(request.getTaskName());
         task.setDescription(request.getDescription());
         task.setPriority(request.getPriority());
@@ -189,6 +241,22 @@ public class TaskService {
         String currentStatus = task.getStatus();
         String newStatus = request.getStatus();
 
+        // 个人项目直通:本人推进自己任务,简化流转(TODO→IN_PROGRESS→DONE 可直达,免自测/测试/QA验收/工时强制)
+        if (projectAccessGuard.isPrivateOwner(SecurityContextHolder.getCurrentUserId(), task.getProjectId())) {
+            boolean okPrivate = isValidTaskTransition(currentStatus, newStatus)
+                    || (BizConstants.TASK_IN_PROGRESS.equals(currentStatus) && BizConstants.TASK_DONE.equals(newStatus))
+                    || (BizConstants.TASK_SELF_TESTING.equals(currentStatus) && BizConstants.TASK_DONE.equals(newStatus));
+            if (!okPrivate) {
+                throw BusinessException.badRequest("不允许的状态转换: " + currentStatus + " -> " + newStatus);
+            }
+            task.setStatus(newStatus);
+            if (BizConstants.TASK_DONE.equals(newStatus)) task.setCompletedAt(LocalDateTime.now());
+            if (taskMapper.updateById(task) == 0) {
+                throw BusinessException.badRequest("任务已被他人修改，请刷新后重试");
+            }
+            return;
+        }
+
         // Validate state transition
         if (!isValidTaskTransition(currentStatus, newStatus)) {
             throw BusinessException.badRequest("不允许的状态转换: " + currentStatus + " -> " + newStatus);
@@ -205,6 +273,15 @@ public class TaskService {
             if (task.getAssigneeId() != null && !task.getAssigneeId().equals(currentUserId)
                     && !roleChecker.hasPermission(currentUserId, "task:create")) {
                 throw BusinessException.forbidden("只有任务负责人本人才能推进开发流转");
+            }
+        }
+        // 工时闭环:标准/完整档任务提测(→TESTING)前必须录入实际工时,否则预估偏差分析永远缺数据
+        if (!isQaReject && BizConstants.TASK_TESTING.equals(newStatus)) {
+            com.rd.platform.model.entity.BizProject proj = projectMapper.selectById(task.getProjectId());
+            String gear = BizConstants.normalizeGear(proj != null ? proj.getGearLevel() : null);
+            if (!BizConstants.GEAR_LIGHTWEIGHT.equals(gear)
+                    && (task.getActualHours() == null || task.getActualHours().doubleValue() <= 0)) {
+                throw BusinessException.badRequest("提测前请先填写实际工时(任务详情-填写工时),用于预估偏差分析与排期校准");
             }
         }
         // 测试侧流转（TESTING->DONE 测试通过 / TESTING->IN_PROGRESS 打回）只能由测试(QA)操作，且不能验证自己负责的任务（防自审）
@@ -302,7 +379,7 @@ public class TaskService {
 
     @Data
     public static class TaskCreateRequest {
-        @NotNull(message = "需求ID不能为空")
+        /** 团队项目必填(service 校验);个人项目留痕任务无需求可挂 */
         private Long requirementId;
         @NotNull(message = "项目ID不能为空")
         private Long projectId;
@@ -319,7 +396,7 @@ public class TaskService {
         private LocalDate startDate;
         @NotNull(message = "截止日期不能为空")
         private LocalDate dueDate;
-        @NotBlank(message = "验收标准不能为空")
+        /** 团队项目必填(service 校验);个人项目豁免 */
         private String acceptanceCriteria;
     }
 

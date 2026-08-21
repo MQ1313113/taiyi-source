@@ -48,6 +48,12 @@ public class BugController {
         return Result.success("状态变更成功");
     }
 
+    @PostMapping("/{id}/to-knowledge")
+    @AuditLog(module = "缺陷管理", operation = "缺陷沉淀为知识")
+    public Result<?> toKnowledge(@PathVariable Long id) {
+        return Result.success("已沉淀到知识库", bugService.toKnowledge(id));
+    }
+
     @PutMapping("/{id}/reassign")
     @AuditLog(module = "缺陷管理", operation = "转派缺陷")
     public Result<?> reassign(@PathVariable Long id, @RequestBody BugService.ReassignRequest request) {

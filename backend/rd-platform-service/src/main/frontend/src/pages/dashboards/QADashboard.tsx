@@ -3,11 +3,13 @@ import { useState, useEffect } from "react";
 import { useLocation, Link } from "wouter";
 import { motion } from "framer-motion";
 import { TestTube2, Bug, CheckCircle2, AlertTriangle, FileCheck, ArrowRight, Plus, Play, Clock } from "lucide-react";
-import { bugApi, testCaseApi } from "@/services/api";
+import { bugApi, testCaseApi, projectApi } from "@/services/api";
 import MyTodoPanel from "@/components/MyTodoPanel";
+import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { TestExecuteDialog, BugVerifyDialog, SubmitBugDialog } from "@/components/dialogs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { TestExecuteDialog, BugVerifyDialog, SubmitBugDialog, TestCaseCreateDialog } from "@/components/dialogs";
 
 export default function QADashboard() {
   const { info } = useRole();
@@ -15,23 +17,36 @@ export default function QADashboard() {
   const [bugs, setBugs] = useState<any[]>([]);
   const [testCases, setTestCases] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  // 项目筛选：跨项目混计的统计无意义，默认"全部项目"，可切到单项目看真实口径
+  const [projects, setProjects] = useState<any[]>([]);
+  const [projectId, setProjectId] = useState<string>("");
 
   // Dialog states
   const [testExecuteOpen, setTestExecuteOpen] = useState(false);
   const [submitBugOpen, setSubmitBugOpen] = useState(false);
+  const [createCaseOpen, setCreateCaseOpen] = useState(false);
   const [bugVerifyOpen, setBugVerifyOpen] = useState(false);
   const [bugVerifyConfig, setBugVerifyConfig] = useState({ bugId: "", bugTitle: "" });
 
   const loadData = () => {
+    const pid = projectId ? Number(projectId) : undefined;
     Promise.all([
-      bugApi.list({ page: 1, size: 50 }).catch(() => ({ data: { records: [] } })),
-      testCaseApi.list({ page: 1, size: 50 }).catch(() => ({ data: { records: [] } })),
+      bugApi.list({ pageNum: 1, pageSize: 200, projectId: pid }).catch(() => ({ data: { records: [] } })),
+      testCaseApi.list({ pageNum: 1, pageSize: 200, projectId: pid }).catch(() => ({ data: { records: [] } })),
     ]).then(([bugRes, tcRes]) => {
       setBugs(bugRes.data?.records || bugRes.data || []);
       setTestCases(tcRes.data?.records || tcRes.data || []);
     }).finally(() => setLoading(false));
   };
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [projectId]);
+  // 自动刷新：定时轮询 + 收到通知立即刷新
+  useDashboardAutoRefresh(loadData);
+  useEffect(() => {
+    projectApi.list({ pageNum: 1, pageSize: 100 }).then((res: any) => {
+      const list = res?.data?.records || res?.data || [];
+      setProjects(Array.isArray(list) ? list : []);
+    }).catch(() => setProjects([]));
+  }, []);
 
   const pendingVerify = bugs.filter(b => b.status === "FIXED");
   const activeBugs = bugs.filter(b => b.status !== "CLOSED" && b.status !== "VERIFIED");
@@ -74,6 +89,7 @@ export default function QADashboard() {
       <TestExecuteDialog open={testExecuteOpen} onOpenChange={setTestExecuteOpen} />
       <SubmitBugDialog open={submitBugOpen} onOpenChange={setSubmitBugOpen} onSuccess={loadData} />
       <BugVerifyDialog open={bugVerifyOpen} onOpenChange={(o) => { setBugVerifyOpen(o); if (!o) loadData(); }} {...bugVerifyConfig} />
+      <TestCaseCreateDialog open={createCaseOpen} onOpenChange={setCreateCaseOpen} onSuccess={loadData} />
 
       <div className="flex items-center justify-between">
         <div>
@@ -81,6 +97,15 @@ export default function QADashboard() {
           <p className="text-sm text-muted-foreground mt-1">万物归一，秩序自生 · 让每一次交付都值得信赖</p>
         </div>
         <div className="flex items-center gap-2">
+          <Select value={projectId || "all"} onValueChange={(v) => setProjectId(v === "all" ? "" : v)}>
+            <SelectTrigger className="h-8 w-40 text-xs rounded-xl"><SelectValue placeholder="全部项目" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部项目</SelectItem>
+              {projects.map((p: any) => (
+                <SelectItem key={p.id} value={String(p.id)}>{p.projectName || p.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button
             className="h-8 text-xs rounded-xl bg-[#0088ff] hover:bg-[#0066cc] text-white"
             onClick={() => setTestExecuteOpen(true)}
@@ -90,11 +115,9 @@ export default function QADashboard() {
           <Button variant="outline" className="h-8 text-xs rounded-xl" onClick={() => setSubmitBugOpen(true)}>
             <Bug className="w-3.5 h-3.5 mr-1.5" />提交Bug
           </Button>
-          <Link href="/app/testing">
-            <Button variant="outline" className="h-8 text-xs rounded-xl">
-              <FileCheck className="w-3.5 h-3.5 mr-1.5" />新建用例
-            </Button>
-          </Link>
+          <Button variant="outline" className="h-8 text-xs rounded-xl" onClick={() => setCreateCaseOpen(true)}>
+            <FileCheck className="w-3.5 h-3.5 mr-1.5" />新建用例
+          </Button>
         </div>
       </div>
 

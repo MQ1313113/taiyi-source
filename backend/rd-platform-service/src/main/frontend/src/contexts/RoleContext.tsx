@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
 
 // 角色类型定义
-export type RoleType = "sys_admin" | "pm" | "developer" | "qa";
+export type RoleType = "sys_admin" | "pm" | "developer" | "qa" | "support";
 
 // 前端使用的权限标识（保持不变，各页面已在使用）
 export type Permission =
@@ -82,10 +82,10 @@ const backendMenuToKey: Record<string, string[]> = {
   "project": ["projects"],
   "requirement": ["requirements"],
   "task": ["tasks", "submit-test"],
-  "test": ["testing"],
+  "test": ["testing", "releases"],
   "testing": ["testing"],
   "bug": ["bugs"],
-  "change": ["changes"],
+  "change": ["changes", "releases"],
   "debt": ["debt"],
   "knowledge": ["knowledge"],
   "metric": ["metrics", "governance"],
@@ -173,6 +173,9 @@ const rolePermissionsFallback: Record<RoleType, Permission[]> = {
     "submit:approve", "submit:view",
     "ticket:create", "ticket:view",
   ],
+  support: [
+    "ticket:create", "ticket:triage", "ticket:view",
+  ],
 };
 
 // 全量菜单定义
@@ -188,6 +191,7 @@ const allMenuItems: NavMenuItem[] = [
   { key: "bugs", label: "缺陷管理", path: "/app/bugs", icon: "Bug" },
   { key: "debt", label: "技术债务", path: "/app/debt", icon: "AlertTriangle" },
   { key: "changes", label: "变更管理", path: "/app/changes", icon: "GitBranch" },
+  { key: "releases", label: "发布管理", path: "/app/releases", icon: "Rocket" },
   { key: "metrics", label: "效能度量", path: "/app/metrics", icon: "BarChart3" },
   { key: "governance", label: "责任看板", path: "/app/governance", icon: "Radar" },
   { key: "knowledge", label: "知识库", path: "/app/knowledge", icon: "BookOpen" },
@@ -218,11 +222,11 @@ function filterMenusByPermissions(backendPerms: string[], role: RoleType): NavMe
     }
   }
   
-  // 确定工作台路径
+  // 确定工作台路径。未知角色兜底到 dev(展示面最小),绝不能兜底 admin
   const dashboardPath = role === "pm" ? "/app/dashboard/pm"
-    : role === "developer" ? "/app/dashboard/dev"
     : role === "qa" ? "/app/dashboard/qa"
-    : "/app/dashboard/admin";
+    : role === "support" ? "/app/dashboard/support"
+    : "/app/dashboard/dev";
   
   return allMenuItems
     .filter(item => allowedKeys.has(item.key))
@@ -249,6 +253,7 @@ export const roleInfo: Record<RoleType, { label: string; name: string; avatar: s
   pm: { label: "产品经理", name: "张三", avatar: "张", color: "#ec4899" },
   developer: { label: "开发人员", name: "王五", avatar: "王", color: "#22c55e" },
   qa: { label: "测试人员", name: "赵六", avatar: "赵", color: "#f59e0b" },
+  support: { label: "售后工程师", name: "售后", avatar: "售", color: "#06b6d4" },
 };
 
 // 顶部快捷操作按钮定义
@@ -275,6 +280,10 @@ const roleQuickActions: Record<RoleType, QuickAction[]> = {
   qa: [
     { label: "新建用例", icon: "FileCheck", path: "/app/testing" },
     { label: "提交Bug", icon: "Bug", path: "/app/bugs" },
+  ],
+  support: [
+    { label: "工单管理", icon: "Ticket", path: "/app/tickets" },
+    { label: "知识库", icon: "BookOpen", path: "/app/knowledge" },
   ],
 };
 

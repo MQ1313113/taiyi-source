@@ -30,10 +30,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/api/v1/auth/login",
             "/api/v1/auth/register",
             "/api/v1/system-config/public",
-            "/swagger-resources",
-            "/v2/api-docs",
-            "/doc.html",
-            "/webjars",
+            "/api/v1/public/",
             "/ws"
     );
 
@@ -74,6 +71,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     new UsernamePasswordAuthenticationToken(username, null, authorities);
             org.springframework.security.core.context.SecurityContextHolder.getContext()
                     .setAuthentication(authentication);
+
+            // 滑动续期：持续使用中的会话不掉线。剩余有效期不足一半时签发新 token,
+            // 通过响应头下发,前端拦截器读到后替换本地 token,实现"在用即续"
+            long remainMs = claims.getExpiration().getTime() - System.currentTimeMillis();
+            long totalMs = claims.getExpiration().getTime() - claims.getIssuedAt().getTime();
+            if (totalMs > 0 && remainMs < totalMs / 2) {
+                String renewed = jwtUtils.generateToken(userId, username, roles);
+                response.setHeader("X-Renewed-Token", renewed);
+            }
         } else {
             response.setStatus(401);
             response.setContentType("application/json;charset=UTF-8");

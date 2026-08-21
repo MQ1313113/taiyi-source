@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useLocation, useRoute } from "wouter";
 import { ticketApi, userApi, projectApi } from "@/services/api";
 import FlowPath from "@/components/FlowPath";
+import PrioritySelectItems from "@/components/PrioritySelectItems";
 import { useRole } from "@/contexts/RoleContext";
 import { toast } from "sonner";
 
@@ -25,6 +26,8 @@ const nextActions: Record<string, { to: string; label: string }[]> = {
   RESOLVED: [{ to: "CLOSED", label: "关闭工单" }, { to: "PROCESSING", label: "重新处理" }],
 };
 const CONVERT_LABEL: Record<string, string> = { REQUIREMENT: "需求", BUG: "缺陷", TASK: "任务" };
+const SOURCE_LABEL: Record<string, string> = { SALES: "销售", SUPPORT: "售后", CUSTOMER: "客户", PRODUCT: "产品", INTERNAL: "内部", EXTERNAL: "外部提交" };
+const CATEGORY_LABEL: Record<string, string> = { BUG: "缺陷", REQUIREMENT: "需求", AFTERSALES: "售后", OTHER: "其他" };
 
 export default function TicketDetail() {
   const [, setLocation] = useLocation();
@@ -38,7 +41,7 @@ export default function TicketDetail() {
   const [names, setNames] = useState<Record<number, string>>({});
   const [projects, setProjects] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
-  const [tForm, setTForm] = useState<any>({ projectId: "", assigneeId: "", convertTo: "none" });
+  const [tForm, setTForm] = useState<any>({ projectId: "", assigneeId: "", convertTo: "none", priority: "", category: "" });
 
   const load = () => {
     setLoading(true);
@@ -58,11 +61,20 @@ export default function TicketDetail() {
 
   const nameOf = (id: number) => names[id] || (id ? `用户#${id}` : "-");
 
+  // 外部匿名单首次分诊:必须人工确认优先级与问题分类,后端同样强制校验
+  const isExternalPending = ticket?.source === "EXTERNAL" && ticket?.status === "PENDING_TRIAGE";
+
   const doTriage = () => {
+    if (isExternalPending && (!tForm.priority || !tForm.category)) {
+      toast.error("外部工单必须先确认优先级与问题分类");
+      return;
+    }
     const payload: any = {};
     if (tForm.projectId) payload.projectId = Number(tForm.projectId);
     if (tForm.assigneeId) payload.assigneeId = Number(tForm.assigneeId);
     if (tForm.convertTo !== "none") payload.convertTo = tForm.convertTo;
+    if (tForm.priority) payload.priority = tForm.priority;
+    if (tForm.category) payload.category = tForm.category;
     ticketApi.triage(ticketId, payload).then(() => { toast.success("分诊完成"); load(); })
       .catch((e: any) => toast.error(e?.message || "分诊失败"));
   };
@@ -94,8 +106,13 @@ export default function TicketDetail() {
               <Ticket className="w-5 h-5 text-[#0088ff]" /> {ticket.title}
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {ticket.ticketCode} · 提报人 {nameOf(ticket.reporterId)} · 责任人 {nameOf(ticket.assigneeId)}
+              {ticket.ticketCode} · 提报人 {ticket.source === "EXTERNAL" ? "外部来访" : nameOf(ticket.reporterId)} · 责任人 {nameOf(ticket.assigneeId)}
             </p>
+            {ticket.source === "EXTERNAL" && (
+              <p className="text-sm mt-1 text-amber-600">
+                外部提交 · 联系方式:{ticket.contactInfo || "未留"}(处理进展需人工联系报告人)
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <Badge>{ticket.priority}</Badge>
@@ -104,8 +121,8 @@ export default function TicketDetail() {
         </div>
 
         <div className="grid grid-cols-3 gap-4 mt-6 text-sm">
-          <div><span className="text-muted-foreground text-xs">来源</span><br />{ticket.source}</div>
-          <div><span className="text-muted-foreground text-xs">类型</span><br />{ticket.category}</div>
+          <div><span className="text-muted-foreground text-xs">来源</span><br />{SOURCE_LABEL[ticket.source] || ticket.source}</div>
+          <div><span className="text-muted-foreground text-xs">类型</span><br />{CATEGORY_LABEL[ticket.category] || ticket.category}</div>
           <div><span className="text-muted-foreground text-xs">项目</span><br />{ticket.projectId || "未指定"}</div>
         </div>
         <div className="mt-4 p-4 bg-muted/30 rounded-lg">
@@ -138,6 +155,31 @@ export default function TicketDetail() {
       {canTriage && ticket.status !== "RESOLVED" && ticket.status !== "CLOSED" && (
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-xl border border-amber-200 p-6">
           <h3 className="text-sm font-semibold mb-4">分诊 / 转派</h3>
+          {isExternalPending && (
+            <div className="mb-4 grid grid-cols-2 gap-3 p-3 bg-amber-50 rounded-lg">
+              <div className="space-y-1">
+                <Label className="text-xs">确认优先级 <span className="text-red-500">*</span></Label>
+                <Select value={tForm.priority || "unset"} onValueChange={(v) => setTForm({ ...tForm, priority: v === "unset" ? "" : v })}>
+                  <SelectTrigger><SelectValue placeholder="请确认" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unset">请确认</SelectItem>
+                    <PrioritySelectItems showSla />
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">问题分类 <span className="text-red-500">*</span></Label>
+                <Select value={tForm.category || "unset"} onValueChange={(v) => setTForm({ ...tForm, category: v === "unset" ? "" : v })}>
+                  <SelectTrigger><SelectValue placeholder="请归类" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unset">请归类</SelectItem>
+                    {Object.entries(CATEGORY_LABEL).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="col-span-2 text-xs text-amber-700">外部匿名工单:请先核实工单内容,确认优先级与分类后才能分诊转入内部处理。</p>
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1">
               <Label className="text-xs">指定项目</Label>

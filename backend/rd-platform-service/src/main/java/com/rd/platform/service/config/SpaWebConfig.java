@@ -28,7 +28,7 @@ public class SpaWebConfig implements WebMvcConfigurer {
                         if (requested.exists() && requested.isReadable()) {
                             return requested;
                         }
-                        // API 与 WebSocket 不回退，返回 null 让后续处理器接管（最终 404/由控制器处理）
+                        // API/WebSocket 路径不回退，交由控制器或最终 404
                         if (resourcePath.startsWith("api/") || resourcePath.startsWith("ws/")) {
                             return null;
                         }

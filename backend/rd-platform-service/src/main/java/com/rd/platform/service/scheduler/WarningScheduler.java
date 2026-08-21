@@ -45,6 +45,12 @@ public class WarningScheduler {
     @Autowired
     private SysUserRoleMapper sysUserRoleMapper;
 
+    @Autowired
+    private com.rd.platform.model.mapper.SysUserMapper userMapper;
+
+    @Autowired
+    private com.rd.platform.service.impl.RoleChecker roleChecker;
+
     /** sys_admin 角色 id（种子固定为 1） */
     private static final long ADMIN_ROLE_ID = 1L;
 
@@ -71,6 +77,10 @@ public class WarningScheduler {
                 if (t.getAssigneeId() != null) {
                     notificationService.sendUrgentNotification(t.getAssigneeId(), title, content,
                             BizConstants.NOTIFY_WARNING, "TICKET", t.getId());
+                } else {
+                    // 待分诊超时无责任人:通知全体分诊人(此前静默跳过,超时单无人知晓)
+                    notifyByPermission("ticket:triage", "工单超时未分诊",
+                            "工单「" + t.getTitle() + "」已超SLA仍未分诊,请尽快处理", t.getId());
                 }
                 t.setEscalatedLevel(1);
                 ticketMapper.updateById(t);
@@ -89,6 +99,9 @@ public class WarningScheduler {
                 ticketMapper.updateById(t);
                 escalated++;
             } else if (level == 2 && due.plusMinutes((long) (windowMin * 1.5)).isBefore(now)) {
+                // 最高级升级:业务仲裁人(流程裁决出口)与系统管理员同时知晓
+                notifyByPermission("biz:override", "工单严重超时(仲裁介入)",
+                        content + "（多级升级无果,请仲裁处理）", t.getId());
                 notifyAdmins("工单严重超时", content + "（已上报系统管理员）", t.getId());
                 t.setEscalatedLevel(3);
                 ticketMapper.updateById(t);
@@ -101,6 +114,18 @@ public class WarningScheduler {
     private Long projectOwner(Long projectId) {
         BizProject p = projectMapper.selectById(projectId);
         return p != null ? p.getOwnerId() : null;
+    }
+
+    /** 通知所有持有指定权限的启用用户 */
+    private void notifyByPermission(String permission, String title, String content, Long ticketId) {
+        for (com.rd.platform.model.entity.SysUser u : userMapper.selectList(
+                new LambdaQueryWrapper<com.rd.platform.model.entity.SysUser>()
+                        .eq(com.rd.platform.model.entity.SysUser::getStatus, 1))) {
+            if (roleChecker.hasPermission(u.getId(), permission)) {
+                notificationService.sendUrgentNotification(u.getId(), title, content,
+                        BizConstants.NOTIFY_WARNING, "TICKET", ticketId);
+            }
+        }
     }
 
     private void notifyAdmins(String title, String content, Long ticketId) {

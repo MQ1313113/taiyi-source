@@ -41,9 +41,23 @@ public class BizConstants {
     public static final String SPRINT_COMPLETED = "COMPLETED";
 
     // 档位
-    public static final String GEAR_LIGHTWEIGHT = "L1";
-    public static final String GEAR_STANDARD = "L2";
-    public static final String GEAR_FULL = "L3";
+    // 档位存储值统一为英文全称(与 biz_project.gear_level 存量一致)。
+    // 历史上曾混用 L1/L2/L3 别名导致所有档位比对失配(完整档必填形同虚设),
+    // 一律经 normalizeGear 归一后再比较。
+    public static final String GEAR_LIGHTWEIGHT = "LIGHTWEIGHT";
+    public static final String GEAR_STANDARD = "STANDARD";
+    public static final String GEAR_FULL = "FULL";
+
+    /** 档位取值归一化:兼容 L1/L2/L3 别名与大小写,未知值按标准档处理 */
+    public static String normalizeGear(String gear) {
+        if (gear == null) return GEAR_STANDARD;
+        switch (gear.trim().toUpperCase()) {
+            case "L1": case "LIGHTWEIGHT": return GEAR_LIGHTWEIGHT;
+            case "L3": case "FULL": return GEAR_FULL;
+            case "L2": case "STANDARD":
+            default: return GEAR_STANDARD;
+        }
+    }
 
     // 评审结果
     public static final String REVIEW_APPROVED = "APPROVED";
@@ -81,6 +95,8 @@ public class BizConstants {
     public static final String TICKET_CAT_REQUIREMENT = "REQUIREMENT";
     public static final String TICKET_CAT_AFTERSALES = "AFTERSALES";
     public static final String TICKET_CAT_OTHER = "OTHER";
+    /** 工单来源:外部匿名提交(不登录)。此来源强制人工分诊,不走自动路由 */
+    public static final String TICKET_SOURCE_EXTERNAL = "EXTERNAL";
 
     // 工单转换目标类型
     public static final String TICKET_CONV_REQUIREMENT = "REQUIREMENT";
@@ -104,4 +120,11 @@ public class BizConstants {
     public static final String ASSIGN_ENTITY_TASK = "TASK";
     public static final String ASSIGN_ENTITY_BUG = "BUG";
     public static final String ASSIGN_ENTITY_TICKET = "TICKET";
+
+    // 统一业务优先级（需求/任务/缺陷/工单/用例）。通知级别（URGENT/NORMAL）独立，不在此列。
+    // 历史脏数据（HIGH/MEDIUM/LOW/中文"高"等）由 migration_v12_priority_normalize.sql 归一。
+    public static final String PRIORITY_P0 = "P0"; // 紧急：立即处理
+    public static final String PRIORITY_P1 = "P1"; // 高
+    public static final String PRIORITY_P2 = "P2"; // 中（默认）
+    public static final String PRIORITY_P3 = "P3"; // 低
 }

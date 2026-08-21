@@ -41,7 +41,7 @@ public class SecurityConfig {
             .authorizeRequests()
             .antMatchers("/api/v1/auth/**").permitAll()
             .antMatchers("/api/v1/system-config/public/**").permitAll()
-            .antMatchers("/swagger-resources/**", "/v2/api-docs/**", "/doc.html", "/webjars/**").permitAll()
+            .antMatchers("/api/v1/public/**").permitAll()
             .antMatchers("/ws/**").permitAll()
             // 鉴权收敛到 API 层：其余为前端静态资源与 SPA 外壳，公开放行（登录态由前端 + JWT 控制）
             .antMatchers("/api/**").authenticated()

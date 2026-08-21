@@ -73,6 +73,23 @@ public class MetricsService {
         metrics.put("bugFixRate", totalBugs > 0 ?
                 BigDecimal.valueOf(closedBugs).divide(BigDecimal.valueOf(totalBugs), 4, RoundingMode.HALF_UP) : 0);
 
+        // 工时闭环:预估偏差率 = avg(|实际-预估|/预估),只统计两者都有值的 DONE 任务。
+        // 让"填工时"产生价值:谁的预估总不准、项目排期该留多少 buffer,一目了然
+        java.util.List<BizTask> doneWithHours = taskMapper.selectList(new LambdaQueryWrapper<BizTask>()
+                .eq(BizTask::getProjectId, projectId)
+                .eq(BizTask::getStatus, "DONE")
+                .isNotNull(BizTask::getEstimatedHours)
+                .isNotNull(BizTask::getActualHours));
+        double devSum = 0; int devCnt = 0;
+        for (BizTask t : doneWithHours) {
+            double est = t.getEstimatedHours().doubleValue();
+            double act = t.getActualHours().doubleValue();
+            if (est > 0 && act > 0) { devSum += Math.abs(act - est) / est; devCnt++; }
+        }
+        metrics.put("estimateDeviationRate", devCnt > 0 ?
+                BigDecimal.valueOf(devSum / devCnt).setScale(4, RoundingMode.HALF_UP) : null);
+        metrics.put("estimateSampleCount", devCnt);
+
         return metrics;
     }
 

@@ -24,7 +24,7 @@ export default function ProjectList() {
   const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ name: "", description: "", gear: "L2", startDate: "", endDate: "" });
+  const [form, setForm] = useState({ name: "", description: "", gear: "L2", visibility: "TEAM", startDate: "", endDate: "" });
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
 
@@ -58,18 +58,22 @@ export default function ProjectList() {
     if (!form.name || !form.description || !form.startDate || !form.endDate) {
       toast.error("请填写所有必填字段"); return;
     }
+    // 修复:此前取不存在的 localStorage.userId 导致负责人恒为1(admin)
+    let uid = 1;
+    try { uid = JSON.parse(localStorage.getItem('taiyi_user') || '{}').userId || 1; } catch {}
     const payload = {
       projectName: form.name,
       description: form.description,
       gearLevel: form.gear,
-      ownerId: Number(localStorage.getItem('userId')) || 1,
+      visibility: form.visibility,
+      ownerId: uid,
       startDate: form.startDate,
       endDate: form.endDate
     };
     projectApi.create(payload).then(() => {
       toast.success("项目创建成功");
       setShowCreate(false);
-      setForm({ name: "", description: "", gear: "L2", startDate: "", endDate: "" });
+      setForm({ name: "", description: "", gear: "L2", visibility: "TEAM", startDate: "", endDate: "" });
       fetchProjects();
     }).catch((err: any) => toast.error(err?.response?.data?.message || err?.message || "创建失败"));
   };
@@ -244,6 +248,19 @@ export default function ProjectList() {
               <Textarea value={form.description} onChange={(e) => setForm({...form, description: e.target.value})} placeholder="请输入项目描述" rows={3} />
             </div>
             <div className="space-y-2">
+              <Label className="text-sm font-medium">项目类型 <span className="text-red-500">*</span></Label>
+              <Select value={form.visibility} onValueChange={(v) => setForm({...form, visibility: v})}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TEAM">团队项目 - 正式立项,全流程管控</SelectItem>
+                  <SelectItem value="PRIVATE">个人项目 - 单人负责的正式项目(独立维护/独立测试),仅本人与管理员可见</SelectItem>
+                </SelectContent>
+              </Select>
+              {form.visibility === "PRIVATE" && (
+                <p className="text-[11px] text-amber-600">适用于由您一人负责的项目(如老系统维护、外部硬件测试)。固定轻量档、不可加成员;需要多人协作时请建团队项目</p>
+              )}
+            </div>
+            {form.visibility !== "PRIVATE" && <div className="space-y-2">
               <Label className="text-sm font-medium">框架档位 <span className="text-red-500">*</span></Label>
               <Select value={form.gear} onValueChange={(v) => setForm({...form, gear: v})}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
@@ -254,7 +271,7 @@ export default function ProjectList() {
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-muted-foreground">档位决定表单必填字段级别和流程节点行为</p>
-            </div>
+            </div>}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label className="text-sm font-medium">开始日期 <span className="text-red-500">*</span></Label>

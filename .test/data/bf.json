@@ -1,0 +1,1 @@
+{"projectId":39,"title":"ST-完整档自由文本缺陷","description":"自由文本","expectedResult":"ok","actualResult":"fail","severity":"MINOR","priority":"P2","moduleName":"st","assigneeId":4,"environment":"dev","frequency":"ALWAYS"}

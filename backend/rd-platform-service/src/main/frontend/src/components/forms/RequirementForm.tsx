@@ -8,8 +8,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { requirementApi, userApi, projectApi } from "@/services/api";
+import PrioritySelectItems from "@/components/PrioritySelectItems";
 import { toast } from "sonner";
 import { useProject, type FrameworkLevel } from "@/contexts/ProjectContext";
+import { GwtListInput, serializeGwt, type GwtItem } from "@/components/forms/StepListInput";
 
 // 字段分级定义
 const fieldLevels = {
@@ -46,6 +48,9 @@ export default function RequirementForm({ onSuccess, onCancel, showBanner = true
   const [submitting, setSubmitting] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
+  // AC 结构化条目(Given/When/Then);可切自由文本(后端仍校验三段式关键词)
+  const [acItems, setAcItems] = useState<GwtItem[]>([{ given: "", when: "", then: "" }]);
+  const [acStructMode, setAcStructMode] = useState(true);
 
   useEffect(() => {
     userApi.listWithRoles().then((res: any) => {
@@ -81,7 +86,10 @@ export default function RequirementForm({ onSuccess, onCancel, showBanner = true
     if (!form.projectId) errors.push("所属项目");
     if (!form.title) errors.push("需求标题");
     if (!form.priority) errors.push("优先级");
-    if (!form.acceptanceCriteria) errors.push("验收标准AC");
+    // 非 L1 档位强制结构化(即使此前在 L1 下切过自由文本,档位切换后也兜底拉回)
+    const effectiveAcStruct = acStructMode || currentLevel !== "L1";
+    const acText = effectiveAcStruct ? serializeGwt(acItems) : form.acceptanceCriteria;
+    if (!acText) errors.push(effectiveAcStruct ? "验收标准AC(每条需完整填写 Given/When/Then 三段)" : "验收标准AC");
     if (!form.expectedCompletionDate) errors.push("期望完成日期");
     if (!form.assigneeId) errors.push("负责人");
 
@@ -102,6 +110,7 @@ export default function RequirementForm({ onSuccess, onCancel, showBanner = true
     setSubmitting(true);
     const payload = {
       ...form,
+      acceptanceCriteria: effectiveAcStruct ? serializeGwt(acItems) : form.acceptanceCriteria,
       projectId: parseInt(form.projectId),
       ownerId: form.assigneeId ? parseInt(form.assigneeId) : undefined,
       type: 'FEATURE',
@@ -163,10 +172,7 @@ export default function RequirementForm({ onSuccess, onCancel, showBanner = true
               <Select value={form.priority} onValueChange={(v) => setForm({...form, priority: v})}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="P0">P0 - 紧急</SelectItem>
-                  <SelectItem value="P1">P1 - 高</SelectItem>
-                  <SelectItem value="P2">P2 - 中</SelectItem>
-                  <SelectItem value="P3">P3 - 低</SelectItem>
+                  <PrioritySelectItems />
                 </SelectContent>
               </Select>
             </div>
@@ -184,9 +190,24 @@ export default function RequirementForm({ onSuccess, onCancel, showBanner = true
             </div>
           </div>
           <div className="space-y-2">
-            <Label>验收标准(AC) {getLevelBadge("acceptanceCriteria")}</Label>
-            <Textarea value={form.acceptanceCriteria} onChange={(e) => setForm({...form, acceptanceCriteria: e.target.value})}
-              placeholder="请明确列出验收标准，每条一行：&#10;1. 用户能够...&#10;2. 系统应该...&#10;3. 当...时，应..." rows={4} />
+            <div className="flex items-center justify-between">
+              <Label>验收标准(AC) {getLevelBadge("acceptanceCriteria")}</Label>
+              {/* 档位=团队成熟度:仅 L1 轻量档允许自由文本,标准/完整档强制结构化 */}
+              {currentLevel === "L1" ? (
+                <button type="button" className="text-xs text-[#0088ff] hover:underline"
+                  onClick={() => setAcStructMode(!acStructMode)}>
+                  {acStructMode ? "切换为自由文本" : "切换为结构化填写(推荐)"}
+                </button>
+              ) : (
+                <span className="text-xs text-muted-foreground">当前档位要求按 Given/When/Then 结构化填写</span>
+              )}
+            </div>
+            {acStructMode ? (
+              <GwtListInput value={acItems} onChange={setAcItems} />
+            ) : (
+              <Textarea value={form.acceptanceCriteria} onChange={(e) => setForm({...form, acceptanceCriteria: e.target.value})}
+                placeholder="每条一行,须含 Given/When/Then 三段:&#10;Given 用户已登录 When 点击导出 Then 下载Excel文件" rows={4} />
+            )}
           </div>
           <div className="space-y-2">
             <Label>期望完成日期 <span className="text-red-500">*</span></Label>

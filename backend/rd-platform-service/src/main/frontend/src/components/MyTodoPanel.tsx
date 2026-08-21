@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { Inbox, ChevronRight, AlertTriangle, Scissors, FileText, Plus } from "lucide-react";
@@ -9,7 +10,11 @@ import {
   bugApi,
   submitTestApi,
   userApi,
+  ticketApi,
 } from "@/services/api";
+import TriageDialog from "@/components/tickets/TriageDialog";
+import { PRIORITY_OPTIONS } from "@/components/PrioritySelectItems";
+import { copyText } from "@/lib/clipboard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,10 +31,23 @@ import { Input } from "@/components/ui/input";
 
 interface TodoItem {
   type: string;
+  typeLabel?: string;
   bizId: number;
+  bizCode?: string;
+  projectName?: string;
+  privateProject?: boolean;
   title: string;
   priority?: string;
   status?: string;
+  source?: string;
+  category?: string;
+  severity?: string;
+  estimatedHours?: number;
+  fromUser?: string;
+  createdAt?: string;
+  dueDate?: string;
+  dueLabel?: string;
+  scoreExplain?: string;
   actions: string[];
 }
 
@@ -39,6 +57,7 @@ const ACTION_META: Record<
   { label: string; variant?: "default" | "outline" | "destructive"; needComment?: boolean; minLen?: number }
 > = {
   SUBMIT_REVIEW: { label: "发起评审", variant: "default" },
+  TRIAGE: { label: "分诊", variant: "default" },
   REVIEW_APPROVE: { label: "评审通过", variant: "default" },
   REVIEW_REJECT: { label: "评审驳回", variant: "destructive", needComment: true, minLen: 20 },
   CREATE_TASK: { label: "拆解任务", variant: "default" },
@@ -56,16 +75,19 @@ const ACTION_META: Record<
   BUG_REOPEN: { label: "打回重开", variant: "destructive", needComment: true, minLen: 10 },
   ST_APPROVE: { label: "提测通过", variant: "default" },
   ST_REJECT: { label: "提测驳回", variant: "destructive", needComment: true, minLen: 10 },
+  PROMOTE: { label: "转报团队", variant: "outline" },
   VIEW: { label: "查看详情", variant: "outline" },
 };
 
 // 状态码中文映射：避免工作台直接显示英文状态码
+const DEBT_STATUS: Record<string, string> = { OPEN: "未排期", SCHEDULED: "已排期" };
 const STATUS_LABEL: Record<string, string> = {
   DRAFT: "草稿", REVIEWING: "评审中", DEVELOPING: "开发中", DEVELOPED: "开发完成",
   TESTING: "测试中", TESTED: "测试通过", RELEASING: "发布中", CLOSED: "已关闭", CANCELLED: "已取消",
   TODO: "待开发", IN_PROGRESS: "开发中", SELF_TESTING: "自测中", DONE: "已完成",
   OPEN: "待确认", CONFIRMED: "已确认", FIXING: "修复中", FIXED: "已修复",
   VERIFIED: "已验证", REOPENED: "已重开", PENDING: "待审批", APPROVED: "已通过", REJECTED: "已驳回",
+  PENDING_TRIAGE: "待分诊", DISPATCHED: "已分派", PROCESSING: "处理中", RESOLVED: "已解决",
 };
 
 const PRIORITY_COLOR: Record<string, string> = {
@@ -75,6 +97,36 @@ const PRIORITY_COLOR: Record<string, string> = {
   HIGH: "bg-red-100 text-red-700",
   MEDIUM: "bg-orange-100 text-orange-700",
   LOW: "bg-gray-100 text-gray-600",
+};
+
+// 待办类型标签配色（标签文案由后端 typeLabel 下发，此处只管颜色分族）
+const typeColor = (type: string): string => {
+  if (type.startsWith("REQUIREMENT")) return "bg-purple-100 text-purple-700";
+  if (type.startsWith("BUG")) return "bg-red-100 text-red-700";
+  if (type.startsWith("TICKET")) return "bg-amber-100 text-amber-700";
+  if (type === "SUBMIT_TEST_APPROVE") return "bg-cyan-100 text-cyan-700";
+  if (type === "RELEASE_SMOKE") return "bg-green-100 text-green-700";
+  if (type === "TECH_DEBT") return "bg-gray-100 text-gray-600";
+  if (type === "CONFIG_MISSING") return "bg-red-100 text-red-700";
+  return "bg-blue-100 text-blue-700"; // TASK 等
+};
+
+const SEVERITY_LABEL: Record<string, string> = {
+  BLOCKER: "阻塞", CRITICAL: "严重", HIGH: "高", MAJOR: "主要",
+  MEDIUM: "中", MINOR: "次要", LOW: "低", TRIVIAL: "建议",
+};
+
+const TICKET_CATEGORY_LABEL: Record<string, string> = {
+  BUG: "缺陷", REQUIREMENT: "需求", AFTERSALES: "售后", OTHER: "其他",
+};
+
+// 创建时间 → 等待时长（今天/昨天/N天前）
+const waitingLabel = (iso?: string): string | null => {
+  if (!iso) return null;
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  if (days <= 0) return "今天";
+  if (days === 1) return "昨天";
+  return `${days}天前`;
 };
 
 export default function MyTodoPanel() {
@@ -93,6 +145,7 @@ export default function MyTodoPanel() {
 
   // 拆解任务弹窗
   const [splitOpen, setSplitOpen] = useState(false);
+  const [triageTicket, setTriageTicket] = useState<any | null>(null);
   const [splitReq, setSplitReq] = useState<any>(null);
   const [taskForm, setTaskForm] = useState({
     taskName: "", description: "", priority: "P1",
@@ -104,8 +157,8 @@ export default function MyTodoPanel() {
   const [reviewReqId, setReviewReqId] = useState<number | null>(null);
   const [selectedReviewers, setSelectedReviewers] = useState<string[]>([]);
 
-  const load = () => {
-    setLoading(true);
+  const load = (silent = false) => {
+    if (!silent) setLoading(true);
     dashboardApi
       .myTodo()
       .then((res: any) => {
@@ -114,6 +167,21 @@ export default function MyTodoPanel() {
       .catch(() => setItems([]))
       .finally(() => setLoading(false));
   };
+
+  // 一键复制周报:本周完成(团队/单人分组)+质量工作+进行中,直接粘贴到汇报群
+  const copyWeekly = async () => {
+    try {
+      const res: any = await dashboardApi.myWeek();
+      const text = res?.data?.reportText || "";
+      await copyText(text);
+      toast.success(`周报已复制(完成${res?.data?.doneCount ?? 0}项/${res?.data?.totalHours ?? 0}h)`, { description: "可直接粘贴到汇报群或周报文档" });
+    } catch (e: any) {
+      toast.error(e?.message || "生成周报失败");
+    }
+  };
+
+  // 自动刷新：定时轮询 + 收到通知立即刷新（静默模式,不闪加载态）
+  useDashboardAutoRefresh(() => load(true));
 
   useEffect(() => {
     load();
@@ -143,6 +211,20 @@ export default function MyTodoPanel() {
         break;
       case "SUBMIT_TEST_APPROVE":
         setLocation(`/app/submit-test`);
+        break;
+      case "TECH_DEBT":
+        setLocation(`/app/debt`);
+        break;
+      case "RELEASE_SMOKE":
+        setLocation(`/app/releases`);
+        break;
+      case "CONFIG_MISSING":
+        setLocation(`/app/settings`);
+        break;
+      case "TICKET_TRIAGE":
+      case "TICKET_HANDLE":
+        // 直达工单详情:详情页带分诊面板与状态推进,点开即可处理
+        setLocation(item.bizId ? `/app/tickets/${item.bizId}` : `/app/tickets`);
         break;
       default:
         break;
@@ -230,6 +312,20 @@ export default function MyTodoPanel() {
   const runAction = async (item: TodoItem, action: string) => {
     if (action === "VIEW") {
       goDetail(item);
+      return;
+    }
+    if (action === "TRIAGE") {
+      // 工单分诊:拉详情后在工作台内弹窗就地处理,不跳转页面
+      ticketApi.detail(item.bizId).then((res: any) => setTriageTicket(res.data))
+        .catch((e: any) => toast.error(e?.message || "工单加载失败"));
+      return;
+    }
+    if (action === "PROMOTE") {
+      // 单人项目任务转报团队:生成需求类工单,PM 分诊后走正式流程
+      taskApi.promote(item.bizId).then(() => {
+        toast.success("已提报为需求工单", { description: "PM 分诊后将转入团队正式流程,进展会通知您" });
+        load(true);
+      }).catch((e: any) => toast.error(e?.message || "转报失败"));
       return;
     }
     const meta = ACTION_META[action];
@@ -340,9 +436,14 @@ export default function MyTodoPanel() {
           <h3 className="font-semibold text-gray-800">我的待办</h3>
           <Badge className="bg-blue-100 text-blue-700">{items.length}</Badge>
         </div>
-        <button onClick={load} className="text-sm text-gray-400 hover:text-blue-600">
-          刷新
-        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={copyWeekly} className="text-sm text-gray-400 hover:text-blue-600">
+            复制周报
+          </button>
+          <button onClick={load} className="text-sm text-gray-400 hover:text-blue-600">
+            刷新
+          </button>
+        </div>
       </div>
 
       <div className="divide-y divide-gray-50 max-h-[420px] overflow-y-auto">
@@ -356,24 +457,71 @@ export default function MyTodoPanel() {
           items.map((item, idx) => (
             <div
               key={`${item.type}-${item.bizId}-${idx}`}
-              className="flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors"
+              title={item.scoreExplain}
+              className="flex items-center justify-between gap-3 px-5 py-2.5 hover:bg-gray-50 transition-colors"
             >
-              <div className="flex items-center gap-3 min-w-0">
-                {item.priority && (
-                  <span
-                    className={`text-xs px-2 py-0.5 rounded font-medium shrink-0 ${
-                      PRIORITY_COLOR[item.priority] || "bg-gray-100 text-gray-600"
-                    }`}
-                  >
-                    {item.priority}
-                  </span>
-                )}
-                <span className="text-sm text-gray-800 truncate">{item.title}</span>
-                {item.status && (
-                  <Badge variant="outline" className="text-xs shrink-0">
-                    {STATUS_LABEL[item.status] || item.status}
-                  </Badge>
-                )}
+              <div className="min-w-0 flex-1">
+                {/* 第一行:类型标签 + 优先级 + 标题 + 外部/严重级标记 */}
+                <div className="flex items-center gap-2 min-w-0">
+                  {item.typeLabel && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${typeColor(item.type)}`}>
+                      {item.typeLabel}
+                    </span>
+                  )}
+                  {item.priority && (
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded font-medium shrink-0 ${
+                        PRIORITY_COLOR[item.priority] || "bg-gray-100 text-gray-600"
+                      }`}
+                    >
+                      {item.priority}
+                    </span>
+                  )}
+                  <span className="text-sm text-gray-800 truncate">{item.title}</span>
+                  {item.source === "EXTERNAL" && (
+                    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">外部</span>
+                  )}
+                  {item.severity && (
+                    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 border border-orange-200">
+                      {SEVERITY_LABEL[item.severity] || item.severity}
+                    </span>
+                  )}
+                </div>
+                {/* 第二行:单号 · 项目 · 状态 · 分类 · 相关人 · 等待时长 · 工时 · 截止 */}
+                <div className="mt-1 flex items-center gap-x-3 gap-y-0.5 flex-wrap text-[11px] text-gray-400">
+                  {item.bizCode && <span className="font-mono">{item.bizCode}</span>}
+                  {item.projectName && (
+                    <span className={item.privateProject ? "text-purple-500" : ""}>
+                      {item.privateProject ? "单人·" : ""}{item.projectName.length > 12 ? item.projectName.slice(0, 12) + "…" : item.projectName}
+                    </span>
+                  )}
+                  {item.status && (
+                    <span>
+                      {(item.type === "TECH_DEBT" ? DEBT_STATUS[item.status] : undefined) || STATUS_LABEL[item.status] || item.status}
+                    </span>
+                  )}
+                  {item.category && item.type.startsWith("TICKET") && (
+                    <span>{TICKET_CATEGORY_LABEL[item.category] || item.category}类</span>
+                  )}
+                  {item.fromUser && <span>来自 {item.fromUser}</span>}
+                  {waitingLabel(item.createdAt) && <span>创建于{waitingLabel(item.createdAt)}</span>}
+                  {item.estimatedHours != null && Number(item.estimatedHours) > 0 && (
+                    <span>预估{Number(item.estimatedHours)}h</span>
+                  )}
+                  {item.dueLabel && (
+                    <span
+                      className={
+                        item.dueLabel.startsWith("已逾期")
+                          ? "text-red-500 font-medium"
+                          : item.dueLabel === "今日到期"
+                            ? "text-orange-500 font-medium"
+                            : ""
+                      }
+                    >
+                      {item.type.startsWith("TICKET") ? "SLA " : ""}{item.dueLabel}
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {/* 仅渲染后端授权的动作按钮，从源头杜绝越权 */}
@@ -478,10 +626,9 @@ export default function MyTodoPanel() {
                 <Label>优先级 <span className="text-red-500">*</span></Label>
                 <select className="w-full h-9 border rounded-md px-2 text-sm"
                   value={taskForm.priority} onChange={(e) => setTaskForm({ ...taskForm, priority: e.target.value })}>
-                  <option value="P0">P0 - 紧急</option>
-                  <option value="P1">P1 - 高</option>
-                  <option value="P2">P2 - 中</option>
-                  <option value="P3">P3 - 低</option>
+                  {PRIORITY_OPTIONS.map((o) => (
+                    <option key={o.v} value={o.v}>{o.label} — {o.desc}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -550,6 +697,10 @@ export default function MyTodoPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 工单分诊弹窗:待办项"分诊"按钮就地处理 */}
+      <TriageDialog ticket={triageTicket} open={!!triageTicket}
+        onOpenChange={(v) => !v && setTriageTicket(null)} onDone={() => load()} />
     </div>
   );
 }

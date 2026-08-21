@@ -63,10 +63,22 @@ public class RequirementService {
     private ProjectAccessGuard projectAccessGuard;
 
     @Autowired
+    private ReleaseOrderService releaseOrderService;
+
+    @Autowired
+    private TicketService ticketService;
+
+    @Autowired
     private SysUserMapper userMapper;
 
     @Autowired
     private com.rd.platform.model.mapper.BizBugMapper bugMapper;
+
+    @Autowired
+    private com.rd.platform.model.mapper.BizReworkLogMapper reworkLogMapper;
+
+    @Autowired
+    private com.rd.platform.model.mapper.BizKnowledgeMapper knowledgeMapper;
 
     @Autowired
     private com.rd.platform.model.mapper.BizTaskMapper taskMapper;
@@ -125,6 +137,20 @@ public class RequirementService {
         BizProject project = projectMapper.selectById(request.getProjectId());
         if (project == null) throw BusinessException.badRequest("项目不存在");
         validateGearFields(project.getGearLevel(), request);
+
+        // 同名查重：同项目下存在未关闭的完全同名需求则拒绝(防复制粘贴式重复需求顺流程一路复制浪费);
+        // 已关闭/已取消的同名放行——迭代二期重做同名功能是合理场景
+        if (StringUtils.hasText(request.getTitle())) {
+            BizRequirement dup = requirementMapper.selectOne(new LambdaQueryWrapper<BizRequirement>()
+                    .eq(BizRequirement::getProjectId, request.getProjectId())
+                    .eq(BizRequirement::getTitle, request.getTitle().trim())
+                    .notIn(BizRequirement::getStatus, BizConstants.REQ_CLOSED, BizConstants.REQ_CANCELLED)
+                    .last("LIMIT 1"));
+            if (dup != null) {
+                throw BusinessException.badRequest("本项目已存在进行中的同名需求 #" + dup.getId()
+                        + "(" + dup.getStatus() + "),请确认是否重复提交;如确为新需求请调整标题以示区分");
+            }
+        }
 
         // Fast track validation
         if (request.getIsFastTrack() != null && request.getIsFastTrack() == 1) {
@@ -409,7 +435,7 @@ public class RequirementService {
         }
 
         // 档位必填校验（复用同一规则）
-        String gear = project.getGearLevel();
+        String gear = BizConstants.normalizeGear(project.getGearLevel());
         if (BizConstants.GEAR_STANDARD.equals(gear) || BizConstants.GEAR_FULL.equals(gear)) {
             if (!StringUtils.hasText(businessValue)) throw BusinessException.badRequest("业务价值为必填项(标准档及以上)");
             if (!StringUtils.hasText(description)) throw BusinessException.badRequest("详细描述为必填项(标准档及以上)");
@@ -461,8 +487,29 @@ public class RequirementService {
         Long operatorId = SecurityContextHolder.getCurrentUserId();
         // 项目级隔离：禁止推进非本人所属项目的需求状态
         projectAccessGuard.assertAccess(operatorId, req.getProjectId(), "需求");
-        if (!roleChecker.hasPermission(operatorId, "requirement:delete")) {
+        // 业务仲裁(biz:override)兜底放行;admin 不再自动拥有业务裁决权
+        if (!roleChecker.hasPermission(operatorId, "biz:override")) {
             checkStatusChangePermission(operatorId, from, to);
+        }
+        // 发布验证卡点：标准/完整档需求关闭前必须挂在"冒烟通过"的发布单上,堵住带病上线的最后一公里
+        if (BizConstants.REQ_CLOSED.equals(to) && BizConstants.REQ_RELEASING.equals(from)) {
+            BizProject proj = projectMapper.selectById(req.getProjectId());
+            releaseOrderService.assertReleasedForClose(req, proj != null ? proj.getGearLevel() : null);
+            // 知识沉淀引导:有过打回或出过严重缺陷的需求,关闭时值得留下教训
+            handleRetroOnClose(req, proj, request.getRetroSummary(), operatorId);
+            // 工单闭环:由工单转入的需求关闭时,反向解决来源工单并通知提报人
+            ticketService.autoResolveBySource(BizConstants.TICKET_CONV_REQUIREMENT, req.getId());
+        }
+        // 测试通过门禁：置 TESTED 前所有任务必须已 DONE(QA 验收)。
+        // mark-developed 已放宽为"任务全部 TESTING 即可"(任务验收挪到测试阶段),此处兜底保证验收不缺席
+        if (BizConstants.REQ_TESTED.equals(to)) {
+            long notDone = taskMapper.selectCount(new LambdaQueryWrapper<BizTask>()
+                    .eq(BizTask::getRequirementId, id)
+                    .ne(BizTask::getStatus, BizConstants.TASK_DONE));
+            if (notDone > 0) {
+                throw BusinessException.badRequest("该需求下还有 " + notDone
+                        + " 个任务未通过测试验收(未 DONE)，不能置为测试通过");
+            }
         }
         // 发布门禁：进入发布(RELEASING)前，该需求下不得有未关闭缺陷（CLOSED/REJECTED 之外均视为未关闭）
         if (BizConstants.REQ_RELEASING.equals(to)) {
@@ -513,12 +560,15 @@ public class RequirementService {
         if (!BizConstants.REQ_DEVELOPING.equals(req.getStatus())) {
             throw BusinessException.badRequest("只有开发中的需求可以标记为开发完成");
         }
-        // 门禁：需求下若存在未完成(非 DONE)的任务，禁止标记开发完成，杜绝"任务没做完就报完成"
-        long unfinishedTasks = taskMapper.selectCount(new LambdaQueryWrapper<BizTask>()
+        // 门禁：所有任务须完成开发与自测(进入 TESTING 或已 DONE)才能标记开发完成。
+        // 注意不要求 DONE——任务级 QA 验收(TESTING→DONE)发生在提测之后的需求测试阶段,
+        // 否则 QA 被迫在"提测"前介入,流程语义颠倒;TESTED 处有全部 DONE 的兜底校验。
+        long undevTasks = taskMapper.selectCount(new LambdaQueryWrapper<BizTask>()
                 .eq(BizTask::getRequirementId, id)
-                .ne(BizTask::getStatus, BizConstants.TASK_DONE));
-        if (unfinishedTasks > 0) {
-            throw BusinessException.badRequest("该需求下还有 " + unfinishedTasks + " 个任务未完成，不能标记为开发完成");
+                .notIn(BizTask::getStatus, BizConstants.TASK_TESTING, BizConstants.TASK_DONE));
+        if (undevTasks > 0) {
+            throw BusinessException.badRequest("该需求下还有 " + undevTasks
+                    + " 个任务未完成开发自测(未达提测状态)，不能标记为开发完成");
         }
         req.setStatus(BizConstants.REQ_DEVELOPED);
         requirementMapper.updateById(req);
@@ -547,6 +597,7 @@ public class RequirementService {
             }
             return;
         }
+
         // 测试退回开发：TESTING → DEVELOPING，测试或产品经理
         if (BizConstants.REQ_TESTING.equals(from) && BizConstants.REQ_DEVELOPING.equals(to)) {
             if (!roleChecker.hasPermission(operatorId, "requirement:test_reject")) {
@@ -606,6 +657,7 @@ public class RequirementService {
     }
 
     private void validateGearFields(String gearLevel, RequirementCreateRequest request) {
+        gearLevel = BizConstants.normalizeGear(gearLevel); // 兼容 L1/L2/L3 别名,防止比对失配
         // L1 fields always required
         if (!StringUtils.hasText(request.getTitle())) throw BusinessException.badRequest("标题不能为空");
         if (!StringUtils.hasText(request.getAcceptanceCriteria())) throw BusinessException.badRequest("验收标准不能为空");
@@ -684,5 +736,43 @@ public class RequirementService {
     public static class StatusRequest {
         @NotBlank(message = "状态不能为空")
         private String status;
+        /** 复盘摘要:完整档需求关闭且命中"有教训"信号(打回/严重缺陷)时必填,自动沉淀知识库 */
+        private String retroSummary;
+    }
+
+    /**
+     * 知识沉淀引导(触发式,非全员强制——强制沉淀只会产出垃圾知识):
+     * 命中信号 = 需求有过打回记录 或 出过 CRITICAL/BLOCKER 缺陷。
+     * 完整档:命中时必须填复盘摘要(≥50字)才能关闭,自动落知识库;
+     * 标准档:命中时通知负责人建议沉淀(可忽略);轻量档不打扰。
+     */
+    private void handleRetroOnClose(BizRequirement req, BizProject proj, String retroSummary, Long operatorId) {
+        long reworks = reworkLogMapper.selectCount(new LambdaQueryWrapper<com.rd.platform.model.entity.BizReworkLog>()
+                .eq(com.rd.platform.model.entity.BizReworkLog::getEntityType, BizConstants.REWORK_ENTITY_REQUIREMENT)
+                .eq(com.rd.platform.model.entity.BizReworkLog::getEntityId, req.getId()));
+        long severeBugs = bugMapper.selectCount(new LambdaQueryWrapper<BizBug>()
+                .eq(BizBug::getRequirementId, req.getId())
+                .in(BizBug::getSeverity, "CRITICAL", "BLOCKER"));
+        if (reworks + severeBugs == 0) return; // 无教训信号,不打扰
+
+        String gear = BizConstants.normalizeGear(proj != null ? proj.getGearLevel() : null);
+        if (BizConstants.GEAR_FULL.equals(gear)) {
+            if (retroSummary == null || retroSummary.trim().length() < 50) {
+                throw BusinessException.badRequest("该需求经历过 " + reworks + " 次打回、" + severeBugs
+                        + " 个严重缺陷,完整档要求关闭前填写复盘摘要(≥50字):哪里出了问题、以后如何避免");
+            }
+            com.rd.platform.model.entity.BizKnowledge k = new com.rd.platform.model.entity.BizKnowledge();
+            k.setProjectId(req.getProjectId());
+            k.setTitle("[复盘] " + req.getTitle());
+            k.setContent("需求 #" + req.getId() + " 关闭复盘(打回 " + reworks + " 次 / 严重缺陷 " + severeBugs + " 个)\n\n"
+                    + retroSummary.trim());
+            k.setCategory("复盘");
+            k.setAuthorId(operatorId);
+            knowledgeMapper.insert(k);
+        } else if (req.getOwnerId() != null) {
+            notificationService.sendNotification(req.getOwnerId(), "建议沉淀复盘",
+                    "需求 [" + req.getTitle() + "] 经历过打回或严重缺陷,建议将教训沉淀到知识库",
+                    BizConstants.NOTIFY_SYSTEM, "REQUIREMENT", req.getId());
+        }
     }
 }

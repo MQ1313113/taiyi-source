@@ -2,11 +2,15 @@ package com.rd.platform.service.controller;
 
 import com.rd.platform.common.annotation.AuditLog;
 import com.rd.platform.common.utils.Result;
+import com.rd.platform.service.impl.TaskScheduleAdviceService;
 import com.rd.platform.service.impl.TaskService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
+import java.math.BigDecimal;
+import java.time.LocalDate;
 
 /**
  * 任务管理接口。业务逻辑已下沉到 {@link TaskService}，此处仅做 HTTP 映射与结果包装。
@@ -17,6 +21,22 @@ public class TaskController {
 
     @Autowired
     private TaskService taskService;
+
+    @Autowired
+    private TaskScheduleAdviceService scheduleAdviceService;
+
+    /**
+     * 排期辅助建议（只读）：按执行人现有负载估算新任务可否按期，返回 OK/TIGHT/CONFLICT 与受影响任务。
+     * 建议仅供创建/编辑任务时参考，是否采纳由人决定。
+     */
+    @GetMapping("/schedule-advice")
+    public Result<?> scheduleAdvice(@RequestParam Long assigneeId,
+                                    @RequestParam BigDecimal estimatedHours,
+                                    @RequestParam(required = false)
+                                    @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dueDate,
+                                    @RequestParam(required = false) Long excludeTaskId) {
+        return Result.success(scheduleAdviceService.advise(assigneeId, estimatedHours, dueDate, excludeTaskId));
+    }
 
     @GetMapping
     public Result<?> list(@RequestParam(defaultValue = "1") Integer pageNum,
@@ -52,6 +72,12 @@ public class TaskController {
     public Result<?> changeStatus(@PathVariable Long id, @RequestBody TaskService.StatusChangeRequest request) {
         taskService.changeStatus(id, request);
         return Result.success("状态变更成功");
+    }
+
+    @PostMapping("/{id}/promote")
+    @AuditLog(module = "任务管理", operation = "单人项目任务转报团队")
+    public Result<?> promote(@PathVariable Long id) {
+        return Result.success("已提报为需求工单,待分诊后转入正式流程", taskService.promote(id));
     }
 
     @PutMapping("/{id}/hours")

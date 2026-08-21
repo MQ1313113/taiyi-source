@@ -54,6 +54,7 @@ class RequirementServiceTest {
         req.setId(2L);
         req.setProjectId(10L);
         req.setStatus(BizConstants.REQ_DRAFT);
+        req.setCreatedBy(1L); // 创建人=当前用户(1L)，防自审校验基于 createdBy，缺此字段则校验被短路
         when(requirementMapper.selectById(2L)).thenReturn(req);
 
         RequirementService.ReviewSubmitRequest r = new RequirementService.ReviewSubmitRequest();

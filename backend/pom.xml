@@ -28,7 +28,6 @@
         <jwt.version>0.9.1</jwt.version>
         <minio.version>8.5.7</minio.version>
         <hutool.version>5.8.23</hutool.version>
-        <knife4j.version>4.3.0</knife4j.version>
     </properties>
 
     <dependencyManagement>
@@ -69,11 +68,6 @@
                 <groupId>cn.hutool</groupId>
                 <artifactId>hutool-all</artifactId>
                 <version>${hutool.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.github.xiaoymin</groupId>
-                <artifactId>knife4j-openapi2-spring-boot-starter</artifactId>
-                <version>${knife4j.version}</version>
             </dependency>
             <!-- Internal modules -->
             <dependency>

@@ -9,6 +9,7 @@ import com.rd.platform.model.entity.SysRolePermission;
 import com.rd.platform.model.mapper.SysPermissionMapper;
 import com.rd.platform.model.mapper.SysRoleMapper;
 import com.rd.platform.model.mapper.SysRolePermissionMapper;
+import com.rd.platform.model.mapper.SysUserRoleMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -54,6 +55,9 @@ public class SystemDataInitializer implements ApplicationRunner {
     @Resource
     private SysRolePermissionMapper rolePermissionMapper;
 
+    @Resource
+    private SysUserRoleMapper userRoleMapper;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
@@ -66,12 +70,40 @@ public class SystemDataInitializer implements ApplicationRunner {
             syncPermissions();
             syncRoles();
             syncRolePermissions();
+            warnIfBizOverrideMissing();
 
             long elapsed = System.currentTimeMillis() - startTime;
             log.info("========== 系统配置数据校验完成，耗时 {}ms ==========", elapsed);
         } catch (Exception e) {
             log.error("系统配置数据校验失败", e);
             throw e;
+        }
+    }
+
+    /**
+     * 业务仲裁权限(biz:override)持有人检查:无启用用户持有时启动告警。
+     * 该权限是流程卡死时的裁决出口,缺失则卡单无人能解;admin 工作台亦有常驻待办提醒。
+     */
+    private void warnIfBizOverrideMissing() {
+        try {
+            SysPermission perm = permissionMapper.selectList(null).stream()
+                    .filter(p -> "biz:override".equals(p.getPermissionCode())).findFirst().orElse(null);
+            boolean ok = false;
+            if (perm != null) {
+                java.util.Set<Long> roleIds = new java.util.HashSet<>();
+                for (SysRolePermission rp : rolePermissionMapper.selectList(null)) {
+                    if (perm.getId().equals(rp.getPermissionId())) roleIds.add(rp.getRoleId());
+                }
+                if (!roleIds.isEmpty()) {
+                    ok = userRoleMapper.selectList(null).stream().anyMatch(ur -> roleIds.contains(ur.getRoleId()));
+                }
+            }
+            if (!ok) {
+                log.warn("[配置缺失] 业务仲裁权限(biz:override)当前无人持有!流程卡死时将无人可裁决,"
+                        + "请在[系统设置-用户管理]为可信成员打开\"业务仲裁\"开关(任意业务岗位可兼任,建议至少2人)");
+            }
+        } catch (Exception e) {
+            log.warn("[配置检查] biz:override 持有人检查失败: {}", e.getMessage());
         }
     }
 

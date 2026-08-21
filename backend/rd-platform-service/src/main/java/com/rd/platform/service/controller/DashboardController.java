@@ -30,6 +30,11 @@ public class DashboardController {
         return Result.success(dashboardService.myTodo());
     }
 
+    @GetMapping("/my-week")
+    public Result<?> myWeek() {
+        return Result.success(dashboardService.myWeek());
+    }
+
     @GetMapping("/metrics")
     public Result<?> metrics(@RequestParam(required = false) Long projectId) {
         return Result.success(dashboardService.metrics(projectId));

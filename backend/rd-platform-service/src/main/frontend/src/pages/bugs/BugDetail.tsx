@@ -110,7 +110,19 @@ export default function BugDetail() {
       {bug.rootCause && (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
           className="bg-white rounded-xl border border-border/60 p-6">
-          <h3 className="text-sm font-semibold mb-3">根因 / 修复说明</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold">根因 / 修复说明</h3>
+            {(bug.status === "CLOSED" || bug.status === "VERIFIED") && (
+              <Button size="sm" variant="outline" className="rounded-xl h-8 text-xs"
+                onClick={() => {
+                  bugApi.toKnowledge(bug.id).then(() => {
+                    toast.success("已沉淀到知识库(分类:缺陷复盘)");
+                  }).catch((e: any) => toast.error(e?.message || "沉淀失败"));
+                }}>
+                沉淀为知识
+              </Button>
+            )}
+          </div>
           <div className="p-4 bg-blue-50/50 rounded-lg border border-blue-200/50">
             <p className="text-sm">{bug.rootCause}</p>
             {bug.fixerId && <p className="text-xs text-muted-foreground mt-2">修复人: {nameOf(bug.fixerId)}</p>}

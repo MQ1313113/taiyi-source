@@ -43,6 +43,8 @@ public class SprintCapacityGuard {
     private BizProjectMemberMapper memberMapper;
     @Autowired
     private SysUserMapper userMapper;
+    @Autowired
+    private com.rd.platform.model.mapper.BizTechDebtMapper techDebtMapper;
 
     /** 单人容量（小时）。迭代日期缺失时返回 0，表示不做容量限制。 */
     public double capacityHours(BizSprint sprint) {
@@ -55,7 +57,7 @@ public class SprintCapacityGuard {
         return workingDays * WORK_HOURS_PER_DAY;
     }
 
-    /** 某成员在此迭代已排的预估工时之和。 */
+    /** 某成员在此迭代已排的预估工时之和(任务 + 已排期技术债——债和需求抢同一个容量池,负载才真实)。 */
     public double plannedHours(Long sprintId, Long assigneeId) {
         if (sprintId == null || assigneeId == null) return 0;
         List<BizTask> tasks = taskMapper.selectList(new LambdaQueryWrapper<BizTask>()
@@ -64,6 +66,14 @@ public class SprintCapacityGuard {
         double sum = 0;
         for (BizTask t : tasks) {
             if (t.getEstimatedHours() != null) sum += t.getEstimatedHours().doubleValue();
+        }
+        List<com.rd.platform.model.entity.BizTechDebt> debts = techDebtMapper.selectList(
+                new LambdaQueryWrapper<com.rd.platform.model.entity.BizTechDebt>()
+                        .eq(com.rd.platform.model.entity.BizTechDebt::getSprintId, sprintId)
+                        .eq(com.rd.platform.model.entity.BizTechDebt::getAssigneeId, assigneeId)
+                        .eq(com.rd.platform.model.entity.BizTechDebt::getStatus, "SCHEDULED"));
+        for (com.rd.platform.model.entity.BizTechDebt d : debts) {
+            if (d.getEstimatedHours() != null) sum += d.getEstimatedHours().doubleValue();
         }
         return sum;
     }

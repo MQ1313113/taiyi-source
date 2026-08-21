@@ -62,6 +62,9 @@ public class ProjectService {
     @Autowired
     private RoleChecker roleChecker;
 
+    @Autowired
+    private ProjectAccessGuard projectAccessGuard;
+
     /** 项目级写操作权限门禁：当前登录用户须具备指定权限点，否则 403 */
     private void requirePermission(String action, String... permissions) {
         Long operatorId = SecurityContextHolder.getCurrentUserId();
@@ -79,6 +82,12 @@ public class ProjectService {
         if (StringUtils.hasText(status)) {
             wrapper.eq(BizProject::getStatus, status);
         }
+        // 私有项目隔离:仅创建者本人与 admin 可见,他人连项目名都不应看到
+        Long uid = SecurityContextHolder.getCurrentUserId();
+        if (!projectAccessGuard.isAdmin(uid)) {
+            wrapper.and(w -> w.ne(BizProject::getVisibility, "PRIVATE")
+                    .or(o -> o.eq(BizProject::getVisibility, "PRIVATE").eq(BizProject::getOwnerId, uid)));
+        }
         wrapper.orderByDesc(BizProject::getCreatedAt);
         return projectMapper.selectPage(page, wrapper);
     }
@@ -88,11 +97,25 @@ public class ProjectService {
         if (project == null) {
             throw BusinessException.badRequest("项目不存在");
         }
+        // 私有项目详情同样隔离
+        Long uid = SecurityContextHolder.getCurrentUserId();
+        if ("PRIVATE".equals(project.getVisibility())
+                && !uid.equals(project.getOwnerId()) && !projectAccessGuard.isAdmin(uid)) {
+            throw BusinessException.forbidden("无权查看该项目");
+        }
         return project;
     }
 
     public BizProject create(ProjectCreateRequest request) {
-        requirePermission("创建项目", "project:create");
+        boolean isPrivate = "PRIVATE".equalsIgnoreCase(request.getVisibility());
+        if (isPrivate) {
+            // 个人项目:任何登录用户可建,用于个人工作留痕(测试测外部硬件/开发做组件等)。
+            // 硬约束:强制轻量档、负责人=本人、不可加成员、不计团队度量——防止沦为绕过立项的影子团队项目
+            request.setOwnerId(SecurityContextHolder.getCurrentUserId());
+            request.setGearLevel(BizConstants.GEAR_LIGHTWEIGHT);
+        } else {
+            requirePermission("创建项目", "project:create");
+        }
         // Check duplicate name
         Long count = projectMapper.selectCount(
                 new LambdaQueryWrapper<BizProject>().eq(BizProject::getProjectName, request.getProjectName()));
@@ -105,7 +128,8 @@ public class ProjectService {
         project.setProjectCode(request.getProjectCode());
         project.setDescription(request.getDescription());
         project.setOwnerId(request.getOwnerId());
-        project.setStatus(BizConstants.PRJ_PLANNING);
+        project.setVisibility(isPrivate ? "PRIVATE" : "TEAM");
+        project.setStatus(isPrivate ? BizConstants.PRJ_ACTIVE : BizConstants.PRJ_PLANNING);
         project.setGearLevel(request.getGearLevel() != null ? request.getGearLevel() : BizConstants.GEAR_STANDARD);
         project.setStartDate(request.getStartDate());
         project.setEndDate(request.getEndDate());
@@ -116,6 +140,8 @@ public class ProjectService {
         member.setProjectId(project.getId());
         member.setUserId(project.getOwnerId());
         member.setRoleCode("PM");
+        // joined_at 列 NOT NULL 且项目未配置 MetaObjectHandler,FieldFill.INSERT 不生效,必须手动赋值
+        member.setCreatedAt(LocalDateTime.now());
         memberMapper.insert(member);
 
         return project;
@@ -153,6 +179,9 @@ public class ProjectService {
         if (project == null) {
             throw BusinessException.badRequest("项目不存在");
         }
+        if ("PRIVATE".equals(project.getVisibility())) {
+            throw BusinessException.badRequest("个人项目固定为轻量档,不支持调整档位");
+        }
         project.setGearLevel(request.getGearLevel());
         // Set 7-day transition period
         project.setGearTransitionDate(LocalDate.now().plusDays(7));
@@ -168,6 +197,10 @@ public class ProjectService {
     }
 
     public BizSprint createSprint(Long projectId, SprintCreateRequest request) {
+        BizProject prjForSprint = projectMapper.selectById(projectId);
+        if (prjForSprint != null && "PRIVATE".equals(prjForSprint.getVisibility())) {
+            throw BusinessException.badRequest("个人项目不支持迭代(其工时不进入团队容量池)");
+        }
         requirePermission("创建迭代", "sprint:create");
         if (request.getEndDate().isBefore(request.getStartDate())) {
             throw BusinessException.badRequest("结束日期不能早于开始日期");
@@ -216,6 +249,10 @@ public class ProjectService {
     }
 
     public void addMember(Long projectId, MemberRequest request) {
+        BizProject prjForVis = projectMapper.selectById(projectId);
+        if (prjForVis != null && "PRIVATE".equals(prjForVis.getVisibility())) {
+            throw BusinessException.badRequest("个人项目不允许添加成员;如需团队协作请走正式立项(可联系产品经理创建团队项目)");
+        }
         requirePermission("添加项目成员", "project:manage_member");
         // 防重：同一项目同一用户不重复添加
         Long exists = memberMapper.selectCount(new LambdaQueryWrapper<BizProjectMember>()
@@ -359,6 +396,8 @@ public class ProjectService {
         @NotNull(message = "项目负责人不能为空")
         private Long ownerId;
         private String gearLevel;
+        /** TEAM(默认)/PRIVATE 个人项目 */
+        private String visibility;
         private LocalDate startDate;
         private LocalDate endDate;
     }

@@ -1,0 +1,1 @@
+{"projectId":1,"title":"ST-结构化仅1步","description":"【问题描述】\nx\n\n【复现步骤】\n1. 只有一步","expectedResult":"ok","actualResult":"fail","severity":"MINOR","priority":"P2","moduleName":"st","assigneeId":4,"environment":"dev","frequency":"ALWAYS"}

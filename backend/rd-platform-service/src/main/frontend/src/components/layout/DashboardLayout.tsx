@@ -4,13 +4,15 @@ import { motion } from "framer-motion";
 import {
   LayoutDashboard, FolderKanban, FileText, Code2, TestTube2,
   Bug, Bell, Settings, ChevronLeft, ChevronRight, Search,
-  Plus, User, LogOut, Layers, BarChart3, Shield,
+  Plus, User, LogOut, KeyRound, Layers, BarChart3, Shield,
   AlertTriangle, BookOpen, Users, Clock, GitBranch,
-  Scissors, UserPlus, Play, FileCheck, ChevronDown, Ticket, Radar
+  Scissors, UserPlus, Play, FileCheck, ChevronDown, Ticket, Radar, Rocket
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger
@@ -20,14 +22,14 @@ import { useRole } from "@/contexts/RoleContext";
 import { useProject, frameworkLevels, type FrameworkLevel } from "@/contexts/ProjectContext";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
-import { notificationApi } from "@/services/api";
+import { notificationApi, userApi } from "@/services/api";
 
 // Icon mapping
 const iconMap: Record<string, React.ElementType> = {
   LayoutDashboard, FolderKanban, FileText, Code2, TestTube2,
   Bug, Bell, Settings, Layers, BarChart3, AlertTriangle,
   BookOpen, Users, Shield, Clock, GitBranch, Scissors,
-  UserPlus, Play, FileCheck, Plus, Ticket, Radar
+  UserPlus, Play, FileCheck, Plus, Ticket, Radar, Rocket
 };
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
@@ -37,11 +39,45 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const rafRef = useRef<number | null>(null);
   const { menuItems, quickActions, info, hasPermission } = useRole();
 
-  const loginUser = (() => {
+  // 登录人信息放 state:个人信息弹窗改完昵称后 setLoginUser 即时刷新头像与显示名,无需重新登录
+  const [loginUser, setLoginUser] = useState<any>(() => {
     try { return JSON.parse(localStorage.getItem("taiyi_user") || "{}"); } catch { return {}; }
-  })();
+  });
   const displayName: string = loginUser?.nickname || loginUser?.username || info.name;
   const displayAvatar: string = (displayName || info.avatar).charAt(0);
+
+  // 个人信息弹窗(全角色可用):自助修改昵称/邮箱/手机,账号名与角色只读
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileForm, setProfileForm] = useState({ username: "", nickname: "", email: "", phone: "" });
+  const [savingProfile, setSavingProfile] = useState(false);
+  const openProfile = () => {
+    setProfileOpen(true);
+    userApi.profile().then((res: any) => {
+      const u = res?.data || {};
+      setProfileForm({ username: u.username || "", nickname: u.nickname || "", email: u.email || "", phone: u.phone || "" });
+    }).catch(() => toast.error("加载个人信息失败"));
+  };
+  const saveProfile = async () => {
+    if (!profileForm.nickname.trim()) { toast.error("昵称不能为空"); return; }
+    setSavingProfile(true);
+    try {
+      await userApi.updateProfile({
+        nickname: profileForm.nickname.trim(),
+        email: profileForm.email.trim(),
+        phone: profileForm.phone.trim(),
+      });
+      // 同步本地缓存,头像/显示名立即生效
+      const next = { ...loginUser, nickname: profileForm.nickname.trim() };
+      localStorage.setItem("taiyi_user", JSON.stringify(next));
+      setLoginUser(next);
+      toast.success("个人信息已更新");
+      setProfileOpen(false);
+    } catch (e: any) {
+      toast.error(e?.message || "保存失败");
+    } finally {
+      setSavingProfile(false);
+    }
+  };
   const { currentLevel, setLevel, levelInfo } = useProject();
   const [levelPopoverOpen, setLevelPopoverOpen] = useState(false);
 
@@ -347,6 +383,16 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                   <p className="text-xs text-muted-foreground">{info.label}</p>
                 </div>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem className="cursor-pointer" onClick={openProfile}>
+                  <User className="w-4 h-4 mr-2" />个人信息
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="cursor-pointer"
+                  onClick={() => setLocation("/app/change-password")}
+                >
+                  <KeyRound className="w-4 h-4 mr-2" />修改密码
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className="text-destructive cursor-pointer"
                   onClick={() => { localStorage.removeItem("taiyi_token"); localStorage.removeItem("taiyi_user"); localStorage.removeItem("taiyi_role"); setLocation("/"); toast("已退出登录"); }}
@@ -357,6 +403,53 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             </DropdownMenu>
           </div>
         </header>
+
+        {/* 个人信息弹窗:昵称/邮箱/手机自助修改,账号名与角色只读 */}
+        <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+          <DialogContent className="sm:max-w-[440px] rounded-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <User className="w-5 h-5 text-[#0088ff]" />个人信息
+              </DialogTitle>
+              <DialogDescription>修改自己的昵称、邮箱、手机号;账号名与角色由管理员管理</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>账号</Label>
+                  <Input value={profileForm.username} disabled className="rounded-xl bg-muted" />
+                </div>
+                <div className="space-y-2">
+                  <Label>角色</Label>
+                  <Input value={info.label} disabled className="rounded-xl bg-muted" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>昵称 <span className="text-red-500">*</span></Label>
+                <Input className="rounded-xl" value={profileForm.nickname}
+                  onChange={(e) => setProfileForm({ ...profileForm, nickname: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>邮箱</Label>
+                  <Input type="email" className="rounded-xl" value={profileForm.email}
+                    onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label>手机号</Label>
+                  <Input className="rounded-xl" value={profileForm.phone}
+                    onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })} />
+                </div>
+              </div>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" className="rounded-xl" onClick={() => setProfileOpen(false)}>取消</Button>
+              <Button className="rounded-xl bg-[#0088ff] hover:bg-[#0066cc] text-white" disabled={savingProfile} onClick={saveProfile}>
+                保存
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Page Content - 即时渲染，不做整页淡入淡出，避免菜单切换时的闪烁/空白 */}
         <main className="flex-1 overflow-y-auto p-6">

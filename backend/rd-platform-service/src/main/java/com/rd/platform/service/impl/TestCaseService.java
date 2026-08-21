@@ -83,6 +83,9 @@ public class TestCaseService {
     }
 
     public BizTestCase create(TestCaseCreateRequest request) {
+        // 个人项目直通:测试测外部系统/硬件的用例留痕,免关联需求与AC(没有对应需求可挂)
+        boolean privateOwner = projectAccessGuard.isPrivateOwner(
+                SecurityContextHolder.getCurrentUserId(), request.getProjectId());
         // 底线护栏：测试用例必须在需求评审通过、进入开发阶段后才能编写；
         // 草稿/评审中的需求变动极大，禁止提前编写用例。
         if (request.getRequirementId() != null) {
@@ -94,13 +97,15 @@ public class TestCaseService {
                 throw BusinessException.badRequest("需求尚未评审通过进入开发阶段，禁止编写测试用例");
             }
         }
-        // FP-TC-04 / PRD 23.2：用例必须关联需求验收标准(AC)，保证可追溯
-        if (request.getRequirementId() == null) {
+        // FP-TC-04 / PRD 23.2：用例必须关联需求验收标准(AC)，保证可追溯(个人项目豁免)
+        if (!privateOwner && request.getRequirementId() == null) {
             throw BusinessException.badRequest("测试用例必须关联需求");
         }
-        if (!StringUtils.hasText(request.getAcRef())) {
+        if (!privateOwner && !StringUtils.hasText(request.getAcRef())) {
             throw BusinessException.badRequest("测试用例必须关联到需求的某条验收标准(AC)");
         }
+        // 档位=团队成熟度：标准/完整档强制测试步骤为编号分步格式("1. xxx"),仅轻量档放开
+        validateStepsStructure(request.getProjectId(), request.getSteps());
         BizTestCase tc = new BizTestCase();
         tc.setProjectId(request.getProjectId());
         tc.setRequirementId(request.getRequirementId());
@@ -115,6 +120,24 @@ public class TestCaseService {
         tc.setCreatedBy(SecurityContextHolder.getCurrentUserId());
         testCaseMapper.insert(tc);
         return tc;
+    }
+
+    /** 标准/完整档强制测试步骤为编号行格式;轻量档(团队已被认可自觉)不限制 */
+    private void validateStepsStructure(Long projectId, String steps) {
+        if (projectId == null) return;
+        BizProject project = projectMapper.selectById(projectId);
+        String gear = BizConstants.normalizeGear(project != null ? project.getGearLevel() : null);
+        if (BizConstants.GEAR_LIGHTWEIGHT.equals(gear)) return;
+
+        boolean ok = steps != null && java.util.Arrays.stream(steps.split("\r?\n"))
+                .map(String::trim).filter(l -> !l.isEmpty())
+                .allMatch(l -> l.matches("^\\d+[.、)]\\s*.+$"))
+                && steps.trim().length() > 0;
+        if (!ok) {
+            throw BusinessException.badRequest(
+                    (BizConstants.GEAR_FULL.equals(gear) ? "完整档" : "标准档")
+                    + "项目要求测试步骤逐条编号填写(如: 1. 打开页面)");
+        }
     }
 
     public BizTestCase update(Long id, TestCaseCreateRequest request) {
@@ -242,10 +265,11 @@ public class TestCaseService {
         if (!StringUtils.hasText(request.getActualResult()) || request.getActualResult().trim().length() < 10) {
             throw BusinessException.badRequest("实际结果必填且不少于10个字");
         }
-        // P0/P1 用例执行必须上传证据（截图/日得）
-        if (("P0".equals(tc.getPriority()) || "P1".equals(tc.getPriority()))
+        // P0/P1 用例执行必须上传证据（截图/日志）;个人项目留痕场景豁免
+        if (!projectAccessGuard.isPrivateOwner(SecurityContextHolder.getCurrentUserId(), tc.getProjectId())
+                && ("P0".equals(tc.getPriority()) || "P1".equals(tc.getPriority()))
                 && !StringUtils.hasText(request.getEvidenceUrl())) {
-            throw BusinessException.badRequest("P0/P1用例执行必须上传证据(截图/日得)");
+            throw BusinessException.badRequest("P0/P1用例执行必须上传证据(截图/日志)");
         }
         tc.setExecutionStatus(request.getExecutionStatus());
         tc.setActualResult(request.getActualResult());

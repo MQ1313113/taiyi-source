@@ -21,6 +21,10 @@ public class BizSprint implements Serializable {
     private LocalDate startDate;
     private LocalDate endDate;
     private Long createdBy;
+    /** 关闭迭代时的快照:迭代内需求总数(计入完成率度量) */
+    private Integer plannedCount;
+    /** 关闭迭代时的快照:已关闭需求数 */
+    private Integer doneCount;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { bugApi, userApi, projectApi } from "@/services/api";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
+import StepListInput, { serializeSteps } from "@/components/forms/StepListInput";
 
 export default function BugCreate() {
   const [, setLocation] = useLocation();
@@ -21,6 +22,12 @@ export default function BugCreate() {
   const [submitting, setSubmitting] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
+  // 结构化复现步骤;仅轻量档项目允许自由文本(档位=团队成熟度,标准/完整档强制分步)
+  const [reproSteps, setReproSteps] = useState<string[]>([""]);
+  const [structMode, setStructMode] = useState(true);
+  const [freeSteps, setFreeSteps] = useState("");
+  const selectedProject = projects.find((p: any) => String(p.id) === form.projectId);
+  const isLightGear = selectedProject?.gearLevel === "LIGHTWEIGHT";
 
   useEffect(() => {
     userApi.listWithRoles().then((res: any) => {
@@ -36,10 +43,20 @@ export default function BugCreate() {
       toast.error("请填写所有必填字段（所属项目、标题、描述、预期结果、实际结果、所属模块、负责人、测试环境、影响范围）");
       return;
     }
+    // 非轻量档强制分步(即使先选轻量项目切了自由文本再换项目,也在此兜底)
+    const effectiveStructMode = structMode || !isLightGear;
+    const validSteps = reproSteps.map(s => s.trim()).filter(Boolean);
+    if (effectiveStructMode) {
+      if (validSteps.length < 2) { toast.error("复现步骤至少填写 2 步"); return; }
+      if (validSteps.some(s => s.length < 5)) { toast.error("每一步描述不少于 5 个字"); return; }
+    } else if (freeSteps.trim().length < 10) {
+      toast.error("复现步骤不少于 10 个字"); return;
+    }
     setSubmitting(true);
+    const stepsText = effectiveStructMode ? serializeSteps(reproSteps) : freeSteps.trim();
     const payload: any = {
       title: form.title,
-      description: form.description,
+      description: `【问题描述】\n${form.description.trim()}\n\n【复现步骤】\n${stepsText}`,
       severity: form.severity,
       priority: form.priority,
       expectedResult: form.expectedResult,
@@ -146,9 +163,29 @@ export default function BugCreate() {
           </div>
 
           <div className="space-y-2">
-            <Label>缺陷描述(复现步骤) <span className="text-red-500">*</span></Label>
+            <Label>问题描述 <span className="text-red-500">*</span></Label>
             <Textarea value={form.description} onChange={(e) => setForm({...form, description: e.target.value})}
-              placeholder="1. 打开支付页面&#10;2. 选择微信支付&#10;3. 点击确认支付&#10;4. 等待超过30秒&#10;&#10;详细描述Bug的表现和影响范围" rows={4} />
+              placeholder="用一两句话描述问题现象与影响,复现步骤在下方逐条填写" rows={2} />
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>复现步骤 <span className="text-red-500">*</span></Label>
+              {isLightGear ? (
+                <button type="button" className="text-xs text-[#0088ff] hover:underline"
+                  onClick={() => setStructMode(!structMode)}>
+                  {structMode ? "切换为自由文本" : "切换为分步填写(推荐)"}
+                </button>
+              ) : (
+                <span className="text-xs text-muted-foreground">当前项目档位要求分步填写</span>
+              )}
+            </div>
+            {structMode ? (
+              <StepListInput value={reproSteps} onChange={setReproSteps} placeholder="如：打开支付页面,选择微信支付" />
+            ) : (
+              <Textarea value={freeSteps} onChange={(e) => setFreeSteps(e.target.value)}
+                placeholder={"1. 打开支付页面\n2. 选择微信支付\n3. 点击确认支付"} rows={4} />
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-4">

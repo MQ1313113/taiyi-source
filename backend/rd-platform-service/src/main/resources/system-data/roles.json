@@ -1,6 +1,50 @@
 [
-  {"id": 1, "roleCode": "sys_admin", "roleName": "系统管理员", "description": "拥有所有权限", "sortOrder": 1, "status": 1},
-  {"id": 2, "roleCode": "pm", "roleName": "产品经理", "description": "需求管理、变更管理", "sortOrder": 2, "status": 1},
-  {"id": 4, "roleCode": "dev", "roleName": "开发人员", "description": "任务执行、代码开发", "sortOrder": 3, "status": 1},
-  {"id": 5, "roleCode": "qa", "roleName": "测试人员", "description": "测试执行、缺陷管理", "sortOrder": 4, "status": 1}
+  {
+    "id": 1,
+    "roleCode": "sys_admin",
+    "roleName": "系统管理员",
+    "description": "拥有所有权限",
+    "sortOrder": 1,
+    "status": 1
+  },
+  {
+    "id": 2,
+    "roleCode": "pm",
+    "roleName": "产品经理",
+    "description": "需求管理、变更管理",
+    "sortOrder": 2,
+    "status": 1
+  },
+  {
+    "id": 4,
+    "roleCode": "dev",
+    "roleName": "开发人员",
+    "description": "任务执行、代码开发",
+    "sortOrder": 3,
+    "status": 1
+  },
+  {
+    "id": 5,
+    "roleCode": "qa",
+    "roleName": "测试人员",
+    "description": "测试执行、缺陷管理",
+    "sortOrder": 4,
+    "status": 1
+  },
+  {
+    "id": 7,
+    "roleCode": "support",
+    "roleName": "售后工程师",
+    "description": "工单受理与分诊的默认责任角色,可由其他岗位兼任",
+    "sortOrder": 6,
+    "status": 1
+  },
+  {
+    "id": 8,
+    "roleCode": "biz_arbiter",
+    "roleName": "业务仲裁",
+    "description": "流程卡死时的兜底裁决人。不是岗位角色:通过[用户管理]的开关按人授予,可与产品/开发等任意岗位叠加,可多人持有",
+    "sortOrder": 99,
+    "status": 1
+  }
 ]

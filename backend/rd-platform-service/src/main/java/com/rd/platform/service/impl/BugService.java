@@ -46,6 +46,44 @@ public class BugService {
     @Autowired
     private AssignmentLogRecorder assignmentLogRecorder;
 
+    @Autowired
+    private com.rd.platform.model.mapper.BizProjectMapper projectMapper;
+
+    @Autowired
+    private com.rd.platform.model.mapper.BizKnowledgeMapper knowledgeMapper;
+
+    @Autowired
+    private TicketService ticketService;
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(BugService.class);
+
+    /**
+     * 渐进式弹性(与需求 validateGearFields 同思路,深入到内容结构层)：
+     * 缺陷描述必须包含【复现步骤】段且至少 2 条编号步骤("1. xxx"格式)。
+     * 档位语义=团队成熟度：标准档/完整档一律硬校验(靠系统兜住不专业与惰性);
+     * 仅轻量档放开(前提是团队已被认可为能自觉闭环,由管理员降档授权)。
+     */
+    private void validateDescriptionStructure(Long projectId, String description) {
+        com.rd.platform.model.entity.BizProject project = projectMapper.selectById(projectId);
+        String gear = BizConstants.normalizeGear(project != null ? project.getGearLevel() : null);
+        if (BizConstants.GEAR_LIGHTWEIGHT.equals(gear)) return;
+
+        boolean ok = false;
+        if (description != null && description.contains("【复现步骤】")) {
+            String stepsPart = description.substring(description.indexOf("【复现步骤】"));
+            long stepCount = java.util.Arrays.stream(stepsPart.split("\r?\n"))
+                    .map(String::trim)
+                    .filter(l -> l.matches("^\\d+[.、)]\\s*.+$"))
+                    .count();
+            ok = stepCount >= 2;
+        }
+        if (!ok) {
+            throw BusinessException.badRequest(
+                    (BizConstants.GEAR_FULL.equals(gear) ? "完整档" : "标准档")
+                    + "项目要求缺陷描述包含【复现步骤】段,且至少 2 条编号步骤(请使用分步填写)");
+        }
+    }
+
     public Page<BizBug> list(Integer pageNum, Integer pageSize, Long projectId, Long sprintId,
                              Long assigneeId, String status, String severity, String keyword) {
         Page<BizBug> page = new Page<>(pageNum, pageSize);
@@ -76,19 +114,25 @@ public class BugService {
     public BizBug create(BugCreateRequest request) {
         Long currentUserId = SecurityContextHolder.getCurrentUserId();
 
-        // 权限门禁(FP-BUG-03 / PRD 25.4.2)：只有测试或产品可提交Bug，拦截开发越权
+        // 权限门禁(FP-BUG-03)：测试/产品/开发均可提交Bug(bug:create),拦截无权角色
         if (!roleChecker.hasPermission(currentUserId, "bug:create")) {
-            throw BusinessException.forbidden("只有测试或产品人员可以提交缺陷");
+            throw BusinessException.forbidden("当前角色无提交缺陷权限(bug:create)");
         }
+        // 个人项目直通:自己项目里记的问题自己修,免防自审与负责人角色
+        boolean privateOwner = projectAccessGuard.isPrivateOwner(currentUserId, request.getProjectId());
+        if (privateOwner) request.setAssigneeId(currentUserId);
         // Cross-check R3: Reporter and assignee must be different
-        if (request.getAssigneeId().equals(currentUserId)) {
+        if (!privateOwner && request.getAssigneeId().equals(currentUserId)) {
             throw BusinessException.badRequest("提交人和负责人不能为同一人");
         }
         // 缺陷负责人角色校验(FP-BUG-04 / PRD 25.4.2)：Bug只能指派给开发人员修复
-        if (request.getAssigneeId() == null
-                || !roleChecker.hasPermission(request.getAssigneeId(), "task:dev_progress")) {
+        if (!privateOwner && (request.getAssigneeId() == null
+                || !roleChecker.hasPermission(request.getAssigneeId(), "task:dev_progress"))) {
             throw BusinessException.badRequest("缺陷负责人必须指派给开发人员");
         }
+
+        // 渐进式弹性:按项目档位校验描述的结构化程度(轻量档放行/标准档警示放行/全档硬校验)
+        validateDescriptionStructure(request.getProjectId(), request.getDescription());
 
         BizBug bug = new BizBug();
         bug.setProjectId(request.getProjectId());
@@ -155,6 +199,8 @@ public class BugService {
             bug.setIntroducePhase(request.getIntroducePhase());
         } else if (BizConstants.BUG_CLOSED.equals(newStatus)) {
             bug.setClosedAt(LocalDateTime.now());
+            // 工单闭环:由工单转入的缺陷关闭时,反向解决来源工单并通知提报人
+            ticketService.autoResolveBySource(BizConstants.TICKET_CONV_BUG, bug.getId());
         }
         // 乐观锁：并发下版本不匹配则影响 0 行，显式报冲突而非静默丢更新
         if (bugMapper.updateById(bug) == 0) {
@@ -182,6 +228,32 @@ public class BugService {
 
         // 状态流转强提醒：通知下一环节负责人
         sendBugTransitionNotification(bug, currentStatus, newStatus, currentUserId);
+    }
+
+    /**
+     * 缺陷一键转知识:已关闭且填写过根因分析(rootCause)的缺陷,教训值得沉淀。
+     * 预填标题与内容(现象/根因/引入阶段),作者=操作人。
+     */
+    public com.rd.platform.model.entity.BizKnowledge toKnowledge(Long id) {
+        BizBug bug = bugMapper.selectById(id);
+        if (bug == null) throw BusinessException.badRequest("缺陷不存在");
+        if (!BizConstants.BUG_CLOSED.equals(bug.getStatus()) && !BizConstants.BUG_VERIFIED.equals(bug.getStatus())) {
+            throw BusinessException.badRequest("只有已验证/已关闭的缺陷可以沉淀为知识");
+        }
+        if (bug.getRootCause() == null || bug.getRootCause().trim().isEmpty()) {
+            throw BusinessException.badRequest("请先在缺陷详情填写根因分析(rootCause),再沉淀为知识");
+        }
+        com.rd.platform.model.entity.BizKnowledge k = new com.rd.platform.model.entity.BizKnowledge();
+        k.setProjectId(bug.getProjectId());
+        k.setTitle("[缺陷复盘] " + bug.getTitle());
+        k.setContent("【现象】\n" + bug.getDescription()
+                + "\n\n【根因】\n" + bug.getRootCause()
+                + (bug.getIntroducePhase() != null ? "\n\n【引入阶段】" + bug.getIntroducePhase() : "")
+                + "\n\n(由缺陷 #" + bug.getId() + " 一键沉淀)");
+        k.setCategory("缺陷复盘");
+        k.setAuthorId(SecurityContextHolder.getCurrentUserId());
+        knowledgeMapper.insert(k);
+        return k;
     }
 
     public void reassign(Long id, ReassignRequest request) {
@@ -212,23 +284,25 @@ public class BugService {
 
     /**
      * Bug状态流转角色门禁：
-     * - 确认/拒绝(OPEN→CONFIRMED/REJECTED)：测试人员或产品经理 (bug:edit)
+     * - 确认/打回(OPEN→CONFIRMED/REJECTED)：被指派的负责人本人——测试提交后无需二次确认,
+     *   由指派开发处理时决定"接受开修"或"打回"(打回后测试可 REOPENED 重开)
      * - 开始修复(CONFIRMED→FIXING)：开发人员，且必须是负责人本人
      * - 标记已修复(FIXING→FIXED)：开发人员，且必须是负责人本人
      * - 验证(FIXED→VERIFIED/REOPENED)：测试人员 (bug:close)
      * - 关闭(VERIFIED→CLOSED)：测试人员或产品经理 (bug:close)
      * - 重新打开(REJECTED→REOPENED)：测试人员 (bug:edit)
-     * - 重新确认(REOPENED→CONFIRMED)：测试人员或产品经理 (bug:edit)
      * sys_admin 全程兜底放行。
      */
     private void checkBugStatusPermission(Long operatorId, String from, String to, BizBug bug) {
-        // sys_admin 兜底
-        if (roleChecker.hasPermission(operatorId, "requirement:delete")) return;
+        // 业务仲裁兜底(biz:override):流程卡死时的裁决人,默认=项目经理,可在角色权限页改配。admin 不再做业务兜底
+        if (roleChecker.hasPermission(operatorId, "biz:override")) return;
+        // 个人项目直通:本人对自己项目的缺陷全流程操作(确认/修/验/关),防自审的防御对象不存在
+        if (projectAccessGuard.isPrivateOwner(operatorId, bug.getProjectId())) return;
 
-        // 确认/拒绝/重新确认/重新打开：测试或产品经理
+        // 确认/打回：被指派负责人本人处理(REOPENED→CONFIRMED 的重新确认同理,由负责人接受继续修)
         if (BizConstants.BUG_CONFIRMED.equals(to) || BizConstants.BUG_REJECTED.equals(to)) {
-            if (!roleChecker.hasPermission(operatorId, "bug:confirm")) {
-                throw BusinessException.forbidden("只有测试人员或产品经理可以确认/拒绝Bug");
+            if (bug.getAssigneeId() != null && !bug.getAssigneeId().equals(operatorId)) {
+                throw BusinessException.forbidden("只有被指派的负责人可以确认或打回该缺陷");
             }
             return;
         }

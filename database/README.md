@@ -2,6 +2,14 @@
 
 太一平台的建库脚本统一放在本目录。库名 `rd_platform`，字符集 `utf8mb4`。
 
+> **启动自动建表**：应用启动时会自动执行
+> `backend/rd-platform-service/src/main/resources/schema.sql`（29 张表，`CREATE TABLE IF NOT EXISTS`）
+> 与 `data.sql`（RBAC/管理员/配置种子，`INSERT IGNORE`），均幂等——只需先建好空库
+> `rd_platform`，无需手工执行本目录脚本。schema.sql 由 `init_full.sql` 提取生成并合并了
+> v2 表单字段与 `biz_test_case_change` 表；**结构变更时两处需同步维护**。
+> 注意：`migration_v2` 的 `ADD COLUMN IF NOT EXISTS` 是 MariaDB 语法，MySQL 8 不支持，
+> 老库升级请手工核对列是否存在。
+
 ## 文件说明
 
 | 文件 | 作用 |

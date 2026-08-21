@@ -16,6 +16,7 @@ const DeveloperDashboard = lazy(() => import("./pages/dashboards/DeveloperDashbo
 const ProductManagerDashboard = lazy(() => import("./pages/dashboards/ProductManagerDashboard"));
 const QADashboard = lazy(() => import("./pages/dashboards/QADashboard"));
 const AdminDashboard = lazy(() => import("./pages/dashboards/AdminDashboard"));
+const SupportDashboard = lazy(() => import("./pages/dashboards/SupportDashboard"));
 const RequirementList = lazy(() => import("./pages/requirements/RequirementList"));
 const RequirementCreate = lazy(() => import("./pages/requirements/RequirementCreate"));
 const RequirementDetail = lazy(() => import("./pages/requirements/RequirementDetail"));
@@ -37,11 +38,13 @@ import GlobalNotificationToast from "./components/notifications/GlobalNotificati
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"));
 const SubmitTestList = lazy(() => import("./pages/submit-test/SubmitTestList"));
 const ChangeRequestList = lazy(() => import("./pages/changes/ChangeRequestList"));
+const ReleaseOrderList = lazy(() => import("./pages/releases/ReleaseOrderList"));
 const AuditLogList = lazy(() => import("./pages/audit/AuditLogList"));
 const DependencyList = lazy(() => import("./pages/dependencies/DependencyList"));
 const TicketList = lazy(() => import("./pages/tickets/TicketList"));
 const TicketDetail = lazy(() => import("./pages/tickets/TicketDetail"));
 const GovernancePage = lazy(() => import("./pages/governance/GovernancePage"));
+const SupportPortal = lazy(() => import("./pages/public/SupportPortal"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 
 function LoadingFallback() {
@@ -75,6 +78,7 @@ function AppRoutes() {
           <Route path="/app/dashboard/pm" component={ProductManagerDashboard} />
           <Route path="/app/dashboard/qa" component={QADashboard} />
           <Route path="/app/dashboard/admin" component={AdminDashboard} />
+          <Route path="/app/dashboard/support" component={SupportDashboard} />
           <Route path="/app/projects" component={ProjectList} />
           <Route path="/app/projects/:id" component={ProjectDetail} />
           <Route path="/app/sprints" component={SprintBoard} />
@@ -94,6 +98,7 @@ function AppRoutes() {
           <Route path="/app/notifications" component={NotificationCenter} />
           <Route path="/app/submit-test" component={SubmitTestList} />
           <Route path="/app/changes" component={ChangeRequestList} />
+          <Route path="/app/releases" component={ReleaseOrderList} />
           <Route path="/app/audit" component={AuditLogList} />
           <Route path="/app/dependencies" component={DependencyList} />
           <Route path="/app/tickets" component={TicketList} />
@@ -114,6 +119,7 @@ function Router() {
       <Switch>
         <Route path="/" component={LoginPage} />
         <Route path="/login" component={LoginPage} />
+        <Route path="/support" component={SupportPortal} />
         <Route path="/app/change-password" component={ChangePasswordPage} />
         <Route path="/app/*" component={AppRoutes} />
         <Route component={NotFound} />

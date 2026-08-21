@@ -33,7 +33,7 @@ public class GovernanceService {
     @Autowired private RoleChecker roleChecker;
 
     private void requireManager(Long uid) {
-        if (!roleChecker.hasAnyRole(uid, "pm")) { // sys_admin 自动放行
+        if (!roleChecker.hasAnyRole(uid, "pm", "sys_admin")) { // 治理看板为观察类,admin 显式放行
             throw BusinessException.forbidden("只有产品经理或管理员可以查看治理看板");
         }
     }

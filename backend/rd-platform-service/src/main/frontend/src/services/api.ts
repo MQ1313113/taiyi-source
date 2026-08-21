@@ -29,6 +29,9 @@ api.interceptors.request.use((config) => {
 // Response interceptor - handle errors
 api.interceptors.response.use(
   (response) => {
+    // 滑动续期:后端在会话过半时通过响应头下发新 token,收到即替换,活跃用户永不掉线
+    const renewed = (response.headers as any)?.["x-renewed-token"];
+    if (renewed) localStorage.setItem("taiyi_token", renewed);
     const body = response.data;
     // 业务码校验：后端 Result.code 成功值为 200，非 200 视为业务失败，统一 reject
     // 杜绝“HTTP 200 但业务失败”被前端乐观当成成功的假成功问题
@@ -120,7 +123,8 @@ export const taskApi = {
   create: (data: any) => api.post('/tasks', data),
   update: (id: number, data: any) => api.put(`/tasks/${id}`, data),
   changeStatus: (id: number, data: any) => api.put(`/tasks/${id}/status`, data),
-  logHours: (id: number, data: any) => api.post(`/tasks/${id}/hours`, data),
+  logHours: (id: number, data: any) => api.put(`/tasks/${id}/hours`, data),
+  promote: (id: number) => api.post(`/tasks/${id}/promote`),
 };
 
 // ============ Bugs ============
@@ -130,6 +134,7 @@ export const bugApi = {
   create: (data: any) => api.post('/bugs', data),
   changeStatus: (id: number, data: any) => api.put(`/bugs/${id}/status`, data),
   reassign: (id: number, data: any) => api.put(`/bugs/${id}/reassign`, data),
+  toKnowledge: (id: number) => api.post(`/bugs/${id}/to-knowledge`),
 };
 
 // ============ Test Cases ============
@@ -216,6 +221,7 @@ export const dependencyApi = {
 export const dashboardApi = {
   overview: () => api.get('/dashboard/overview'),
   myTodo: () => api.get('/dashboard/my-todo'),
+  myWeek: () => api.get('/dashboard/my-week'),
   myTasks: () => api.get('/dashboard/my-tasks'),
   myBugs: () => api.get('/dashboard/my-bugs'),
   teamWorkload: () => api.get('/metrics/team-workload'),
@@ -227,13 +233,30 @@ export const dashboardApi = {
 // ============ Users ============
 export const userApi = {
   list: (params?: any) => api.get('/users', { params }),
-  listWithRoles: () => api.get('/users/with-roles'),
+  listWithRoles: (includeSysAdmin?: boolean) =>
+    api.get('/users/with-roles', includeSysAdmin ? { params: { includeSysAdmin: true } } : undefined),
   create: (data: any) => api.post('/users', data),
   update: (id: number, data: any) => api.put(`/users/${id}`, data),
   resetPassword: (id: number, newPassword: string) => api.put(`/users/${id}/password`, { newPassword }),
+  // 业务仲裁开关:授予/回收流程兜底裁决权(biz:override),仅 admin 可操作
+  setArbiter: (id: number, enabled: boolean) => api.put(`/users/${id}/arbiter`, { enabled }),
+  // 变更审批开关:加入/移出变更审批人池(池空回退角色规则),仅 admin 可操作
+  setChangeApprover: (id: number, enabled: boolean) => api.put(`/users/${id}/change-approver`, { enabled }),
   changePassword: (data: { oldPassword: string; newPassword: string }) => api.put('/users/change-password', data),
+  // 当前登录人自己的资料:右上角"个人信息"弹窗回显与保存
+  profile: () => api.get('/users/profile'),
+  updateProfile: (data: { nickname?: string; email?: string; phone?: string }) => api.put('/users/profile', data),
   toggleStatus: (id: number) => api.put(`/users/${id}/toggle-status`),
   delete: (id: number) => api.delete(`/users/${id}`),
+};
+
+// ============ Release Orders ============
+export const releaseOrderApi = {
+  list: (params?: any) => api.get('/release-orders', { params }),
+  detail: (id: number) => api.get(`/release-orders/${id}`),
+  create: (data: any) => api.post('/release-orders', data),
+  advance: (id: number) => api.put(`/release-orders/${id}/advance`),
+  smoke: (id: number, data: { pass: boolean; result: string }) => api.put(`/release-orders/${id}/smoke`, data),
 };
 
 // ============ Roles ============

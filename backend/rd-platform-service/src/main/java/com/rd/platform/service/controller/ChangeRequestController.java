@@ -3,10 +3,14 @@ package com.rd.platform.service.controller;
 import com.rd.platform.common.annotation.AuditLog;
 import com.rd.platform.common.utils.Result;
 import com.rd.platform.service.impl.ChangeRequestService;
+import com.rd.platform.service.impl.ConflictAdvisorService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
+import java.math.BigDecimal;
+import java.time.LocalDate;
 
 /**
  * 变更管理接口。业务逻辑已下沉到 {@link ChangeRequestService}，此处仅做 HTTP 映射与结果包装。
@@ -17,6 +21,26 @@ public class ChangeRequestController {
 
     @Autowired
     private ChangeRequestService changeRequestService;
+
+    @Autowired
+    private ConflictAdvisorService conflictAdvisorService;
+
+    /**
+     * 排期撞车"一键发起变更"的预填草稿（只读不落库）：
+     * 返回按冲突事实组织好的 changeContent/changeReason/impactScope，
+     * 前端填充后仍走既有 POST 提交，权限与双重审批规则不变。
+     */
+    @GetMapping("/conflict-draft")
+    public Result<?> conflictDraft(@RequestParam Long requirementId,
+                                   @RequestParam Long projectId,
+                                   @RequestParam(required = false) String taskName,
+                                   @RequestParam Long assigneeId,
+                                   @RequestParam BigDecimal estimatedHours,
+                                   @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dueDate,
+                                   @RequestParam(required = false) Long excludeTaskId) {
+        return Result.success(conflictAdvisorService.buildChangeDraft(
+                requirementId, projectId, taskName, assigneeId, estimatedHours, dueDate, excludeTaskId));
+    }
 
     @GetMapping
     public Result<?> list(@RequestParam(defaultValue = "1") Integer pageNum,

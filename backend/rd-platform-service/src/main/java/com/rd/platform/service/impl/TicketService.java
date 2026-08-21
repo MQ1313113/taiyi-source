@@ -42,6 +42,14 @@ public class TicketService {
     private NotificationService notificationService;
     @Autowired
     private AssignmentLogRecorder assignmentLogRecorder;
+    @Autowired
+    private SysUserMapper userMapper;
+    @Autowired
+    private SysPermissionMapper permissionMapper;
+    @Autowired
+    private SysRolePermissionMapper rolePermissionMapper;
+    @Autowired
+    private SysUserRoleMapper userRoleMapper;
 
     /** SLA 时限（小时），按优先级。 */
     private long slaHours(String priority) {
@@ -89,6 +97,76 @@ public class TicketService {
                     BizConstants.NOTIFY_TASK_ASSIGN, "TICKET", t.getId());
         }
         return t;
+    }
+
+    // ===== 外部匿名工单(不登录提交) =====
+
+    /**
+     * 外部匿名提交:不鉴权、不走自动路由,强制 P3 + 待分诊,由售后人工确认后转入内部流转。
+     * 提报人落到内置禁用账号 guest,联系方式留在 contact_info;返回工单号+查询码供匿名查询进度。
+     */
+    public java.util.Map<String, String> createExternal(String title, String description, String contactInfo) {
+        SysUser guest = userMapper.selectOne(new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, "guest"));
+        if (guest == null) throw BusinessException.badRequest("外部提交通道未初始化(缺少 guest 账号),请联系管理员");
+        BizTicket t = new BizTicket();
+        t.setTicketCode("TK-TMP");
+        t.setSource(BizConstants.TICKET_SOURCE_EXTERNAL);
+        t.setCategory(BizConstants.TICKET_CAT_OTHER); // 分类由分诊人确认,提交时一律 OTHER
+        t.setTitle(title);
+        t.setDescription(description);
+        t.setPriority(BizConstants.PRIORITY_P3);      // 外部单强制最低优先级,防匿名滥报紧急
+        t.setReporterId(guest.getId());
+        t.setContactInfo(contactInfo);
+        t.setQueryToken(java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12));
+        t.setStatus(BizConstants.TICKET_PENDING_TRIAGE); // 不查路由:外部单必须人工分诊
+        t.setEscalatedLevel(0);
+        t.setSlaDueAt(LocalDateTime.now().plusHours(slaHours(t.getPriority())));
+        ticketMapper.insert(t);
+        t.setTicketCode(String.format("TK-%d-%04d", LocalDate.now().getYear(), t.getId()));
+        ticketMapper.updateById(t);
+
+        for (Long uid : usersWithPermission("ticket:triage")) {
+            notificationService.sendNotification(uid, "外部工单待分诊",
+                    "收到外部提交的工单「" + t.getTitle() + "」,请确认信息并分诊",
+                    BizConstants.NOTIFY_TASK_ASSIGN, "TICKET", t.getId());
+        }
+        java.util.Map<String, String> resp = new java.util.HashMap<>();
+        resp.put("ticketCode", t.getTicketCode());
+        resp.put("queryToken", t.getQueryToken());
+        return resp;
+    }
+
+    /** 匿名查询进度:必须同时持有工单号与查询码,只回状态类字段,不回内部数据。 */
+    public java.util.Map<String, Object> queryExternal(String ticketCode, String queryToken) {
+        BizTicket t = null;
+        if (StringUtils.hasText(ticketCode) && StringUtils.hasText(queryToken)) {
+            t = ticketMapper.selectOne(new LambdaQueryWrapper<BizTicket>()
+                    .eq(BizTicket::getTicketCode, ticketCode.trim())
+                    .eq(BizTicket::getQueryToken, queryToken.trim())
+                    .eq(BizTicket::getSource, BizConstants.TICKET_SOURCE_EXTERNAL));
+        }
+        if (t == null) throw BusinessException.badRequest("工单号或查询码不正确");
+        java.util.Map<String, Object> resp = new java.util.HashMap<>();
+        resp.put("ticketCode", t.getTicketCode());
+        resp.put("title", t.getTitle());
+        resp.put("status", t.getStatus());
+        resp.put("createdAt", t.getCreatedAt());
+        resp.put("resolvedAt", t.getResolvedAt());
+        return resp;
+    }
+
+    /** 查询持有某权限点的全部用户 id(权限→角色→用户三级联查)。 */
+    private List<Long> usersWithPermission(String permissionCode) {
+        SysPermission perm = permissionMapper.selectOne(new LambdaQueryWrapper<SysPermission>()
+                .eq(SysPermission::getPermissionCode, permissionCode));
+        if (perm == null) return java.util.Collections.emptyList();
+        List<SysRolePermission> rps = rolePermissionMapper.selectList(new LambdaQueryWrapper<SysRolePermission>()
+                .eq(SysRolePermission::getPermissionId, perm.getId()));
+        if (rps.isEmpty()) return java.util.Collections.emptyList();
+        List<Long> roleIds = rps.stream().map(SysRolePermission::getRoleId).distinct().collect(java.util.stream.Collectors.toList());
+        List<SysUserRole> urs = userRoleMapper.selectList(new LambdaQueryWrapper<SysUserRole>()
+                .in(SysUserRole::getRoleId, roleIds));
+        return urs.stream().map(SysUserRole::getUserId).distinct().collect(java.util.stream.Collectors.toList());
     }
 
     /** 按 (category [+ projectId]) 命中启用的路由规则；优先精确到项目的规则。 */
@@ -146,6 +224,20 @@ public class TicketService {
             throw BusinessException.badRequest("已解决/关闭的工单不可再分诊");
         }
         Long oldAssignee = t.getAssigneeId();
+        // 外部匿名单强制人工确认:分诊时必须定优先级、做问题归类,确认后才转入内部流转
+        if (BizConstants.TICKET_SOURCE_EXTERNAL.equals(t.getSource())
+                && BizConstants.TICKET_PENDING_TRIAGE.equals(t.getStatus())) {
+            if (!StringUtils.hasText(req.getPriority()) || !StringUtils.hasText(req.getCategory())) {
+                throw BusinessException.badRequest("外部工单必须先确认信息:请设置优先级并选择问题分类后再分诊");
+            }
+        }
+        if (StringUtils.hasText(req.getCategory())) t.setCategory(req.getCategory());
+        if (StringUtils.hasText(req.getPriority()) && !req.getPriority().equals(t.getPriority())) {
+            t.setPriority(req.getPriority());
+            // 优先级变更后从创建时刻重算 SLA:升为紧急的单立即进入紧急时限
+            LocalDateTime base = t.getCreatedAt() != null ? t.getCreatedAt() : LocalDateTime.now();
+            t.setSlaDueAt(base.plusHours(slaHours(req.getPriority())));
+        }
         if (req.getProjectId() != null) t.setProjectId(req.getProjectId());
         if (req.getAssigneeId() != null) t.setAssigneeId(req.getAssigneeId());
 
@@ -180,7 +272,37 @@ public class TicketService {
             notificationService.sendNotification(t.getAssigneeId(), "工单已分派",
                     "工单「" + t.getTitle() + "」已分派给您", BizConstants.NOTIFY_TASK_ASSIGN, "TICKET", id);
         }
+        // 转化追踪:提报人第一时间知道工单去向,后续进展不失联
+        if (t.getConvertedType() != null && t.getReporterId() != null) {
+            String target = BizConstants.TICKET_CONV_REQUIREMENT.equals(t.getConvertedType()) ? "需求" : "缺陷";
+            notificationService.sendNotification(t.getReporterId(), "工单已转化",
+                    "您的工单「" + t.getTitle() + "」已转为" + target + "#" + t.getConvertedId()
+                    + ",完成后将自动通知您", BizConstants.NOTIFY_STATUS_CHANGE, "TICKET", id);
+        }
         return t;
+    }
+
+    /**
+     * 转化目标完结时反向解决工单(供需求/缺陷关闭钩子调用):
+     * 工单置 RESOLVED 并通知提报人——补齐"转化后提报人失联"的断链。幂等。
+     */
+    public void autoResolveBySource(String convertedType, Long convertedId) {
+        if (convertedId == null) return;
+        List<BizTicket> tickets = ticketMapper.selectList(new LambdaQueryWrapper<BizTicket>()
+                .eq(BizTicket::getConvertedType, convertedType)
+                .eq(BizTicket::getConvertedId, convertedId)
+                .notIn(BizTicket::getStatus, BizConstants.TICKET_RESOLVED, BizConstants.TICKET_CLOSED));
+        for (BizTicket t : tickets) {
+            t.setStatus(BizConstants.TICKET_RESOLVED);
+            t.setResolvedAt(LocalDateTime.now());
+            ticketMapper.updateById(t);
+            if (t.getReporterId() != null) {
+                String target = BizConstants.TICKET_CONV_REQUIREMENT.equals(convertedType) ? "需求" : "缺陷";
+                notificationService.sendNotification(t.getReporterId(), "工单已解决",
+                        "您的工单「" + t.getTitle() + "」对应的" + target + "已完成,工单已解决,请确认后关闭",
+                        BizConstants.NOTIFY_STATUS_CHANGE, "TICKET", t.getId());
+            }
+        }
     }
 
     /** 转成需求（DRAFT），回填 sourceTicketId。责任人作为负责人。 */
@@ -188,8 +310,8 @@ public class TicketService {
         BizRequirement r = new BizRequirement();
         r.setProjectId(t.getProjectId());
         r.setTitle(t.getTitle());
-        r.setType("功能");
-        r.setPriority("中");
+        r.setType("FUNCTIONAL");
+        r.setPriority(BizConstants.PRIORITY_P2);
         r.setStatus(BizConstants.REQ_DRAFT);
         r.setDescription(t.getDescription());
         r.setAcceptanceCriteria("（由工单转入，待补充验收标准）");
@@ -298,6 +420,8 @@ public class TicketService {
         private Long projectId;
         private Long assigneeId;
         private String convertTo; // REQUIREMENT / BUG / 空=仅指派
+        private String priority;  // 分诊确认的优先级(外部单必填)
+        private String category;  // 分诊确认的问题分类(外部单必填)
     }
 
     @Data

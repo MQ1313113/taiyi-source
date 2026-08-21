@@ -54,12 +54,12 @@ public class SystemConfigService {
         if (config == null) {
             throw BusinessException.badRequest("配置项不存在: " + key);
         }
-        // 校验token有效期范围
+        // 校验token有效期:上限固定 7 天(168小时)。活跃会话由滑动续期自动延长,无需更长的初始时长
         if ("token.expiration.hours".equals(key)) {
             try {
                 int hours = Integer.parseInt(value);
                 if (hours < 1 || hours > 168) {
-                    throw new BusinessException("会话时长必须在 1~168 小时之间");
+                    throw new BusinessException("会话时长必须在 1~168 小时(7天)之间");
                 }
             } catch (NumberFormatException e) {
                 throw new BusinessException("请输入有效的数字");

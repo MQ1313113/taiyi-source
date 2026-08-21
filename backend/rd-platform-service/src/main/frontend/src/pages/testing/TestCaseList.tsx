@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { useRole } from "@/contexts/RoleContext";
 import ImportDialog from "@/components/ImportDialog";
 import { Upload } from "lucide-react";
+import StepListInput, { serializeSteps } from "@/components/forms/StepListInput";
 
 // 可编写用例的需求状态（进入开发及之后，草稿/评审中不可）
 const CASE_ALLOWED_REQ_STATUS = ["DEVELOPING", "DEVELOPED", "TESTING", "TESTED", "RELEASING"];
@@ -40,6 +41,7 @@ export default function TestCaseList() {
     title: "", module: "", precondition: "", steps: "", expectedResult: "", priority: "MEDIUM", type: "FUNCTIONAL",
     requirementId: "", acRef: "",
   });
+  const [caseSteps, setCaseSteps] = useState<string[]>([""]);
   const [reqOptions, setReqOptions] = useState<any[]>([]);
   const [selectedReq, setSelectedReq] = useState<any>(null);
   const [projects, setProjects] = useState<any[]>([]);
@@ -85,14 +87,15 @@ export default function TestCaseList() {
   const handleCreate = () => {
     if (!form.requirementId) { toast.error("请选择关联需求"); return; }
     if (!form.acRef) { toast.error("请选择关联的验收标准(AC)"); return; }
-    if (!form.title || !form.module || !form.steps || !form.expectedResult || !form.precondition) {
+    const validCaseSteps = caseSteps.map(s => s.trim()).filter(Boolean);
+    if (!form.title || !form.module || validCaseSteps.length === 0 || !form.expectedResult || !form.precondition) {
       toast.error("请填写所有必填字段（标题、模块、前置条件、步骤、预期结果）"); return;
     }
     testCaseApi.create({
       caseName: form.title,
       moduleName: form.module,
       precondition: form.precondition,
-      steps: form.steps,
+      steps: serializeSteps(caseSteps),
       expectedResult: form.expectedResult,
       priority: form.priority,
       requirementId: Number(form.requirementId),
@@ -102,6 +105,7 @@ export default function TestCaseList() {
       toast.success("测试用例创建成功");
       setShowCreate(false);
       setForm({ title: "", module: "", precondition: "", steps: "", expectedResult: "", priority: "MEDIUM", type: "FUNCTIONAL", requirementId: "", acRef: "" });
+      setCaseSteps([""]);
       setSelectedReq(null);
       fetchCases();
     }).catch((err: any) => toast.error(err?.message || "创建失败"));
@@ -262,7 +266,7 @@ export default function TestCaseList() {
             </div>
             <div className="space-y-2">
               <Label>测试步骤 <span className="text-red-500">*</span></Label>
-              <Textarea value={form.steps} onChange={(e) => setForm({...form, steps: e.target.value})} placeholder="1. 步骤一&#10;2. 步骤二&#10;3. 步骤三" rows={4} />
+              <StepListInput value={caseSteps} onChange={setCaseSteps} placeholder="描述这一步的测试操作" />
             </div>
             <div className="space-y-2">
               <Label>预期结果 <span className="text-red-500">*</span></Label>

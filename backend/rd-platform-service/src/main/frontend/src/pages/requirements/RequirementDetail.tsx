@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { requirementApi, taskApi, userApi } from "@/services/api";
+import { PRIORITY_OPTIONS } from "@/components/PrioritySelectItems";
 import { toast } from "sonner";
 import { useRole, type RoleType } from "@/contexts/RoleContext";
 
@@ -123,7 +124,23 @@ export default function RequirementDetail() {
     requirementApi.changeStatus(reqId, { status: nextStatus, comment: "" }).then((res: any) => {
       toast.success(res?.message || `状态已变更为: ${statusConfig[nextStatus]?.label}`);
       loadAll();
-    }).catch((err: any) => toast.error(err?.message || "操作失败"));
+    }).catch((err: any) => {
+      const msg = err?.message || "操作失败";
+      // 完整档知识沉淀卡点:关闭时要求复盘摘要 → 弹输入后带 retroSummary 重试
+      if (nextStatus === "CLOSED" && msg.includes("复盘摘要")) {
+        const summary = window.prompt(msg + "\n\n请输入复盘摘要(不少于50字):");
+        if (summary && summary.trim().length >= 50) {
+          requirementApi.changeStatus(reqId, { status: nextStatus, comment: "", retroSummary: summary.trim() }).then(() => {
+            toast.success("需求已关闭,复盘已自动沉淀到知识库");
+            loadAll();
+          }).catch((e2: any) => toast.error(e2?.message || "操作失败"));
+        } else if (summary !== null) {
+          toast.error("复盘摘要不足50字,未提交");
+        }
+        return;
+      }
+      toast.error(msg);
+    });
   };
 
   // 打开选择评审人弹窗
@@ -413,9 +430,9 @@ export default function RequirementDetail() {
                 <Label>优先级 <span className="text-red-500">*</span></Label>
                 <select className="w-full h-9 border rounded-md px-2 text-sm"
                   value={taskForm.priority} onChange={(e) => setTaskForm({ ...taskForm, priority: e.target.value })}>
-                  <option value="P0">P0</option>
-                  <option value="P1">P1</option>
-                  <option value="P2">P2</option>
+                  {PRIORITY_OPTIONS.map((o) => (
+                    <option key={o.v} value={o.v}>{o.label} — {o.desc}</option>
+                  ))}
                 </select>
               </div>
             </div>

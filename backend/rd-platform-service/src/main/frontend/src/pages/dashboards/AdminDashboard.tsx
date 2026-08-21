@@ -5,12 +5,21 @@ import { motion } from "framer-motion";
 import { Shield, Users, FolderKanban, Activity, ArrowRight, Settings, Bell, Clock, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { auditLogApi, projectApi, userApi } from "@/services/api";
 import MyTodoPanel from "@/components/MyTodoPanel";
+import ExternalPortalQr from "@/components/ExternalPortalQr";
+
+// 非管理员误入(旧链接/角色兜底缺陷)时重定向回各自工作台,防止渲染系统管理视图
+const roleDashboard: Record<string, string> = {
+  pm: "/app/dashboard/pm", developer: "/app/dashboard/dev",
+  qa: "/app/dashboard/qa", support: "/app/dashboard/support",
+};
+import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useProject } from "@/contexts/ProjectContext";
 
 export default function AdminDashboard() {
   const [, setLocation] = useLocation();
+  const { role } = useRole();
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
@@ -18,22 +27,42 @@ export default function AdminDashboard() {
   const { levelInfo } = useProject();
 
   useEffect(() => {
+    if (role !== "sys_admin") setLocation(roleDashboard[role] || "/app/dashboard/dev");
+  }, [role, setLocation]);
+
+  // 统计用分页 total 而非当前页 records 条数：此前 userApi.list() 返回分页对象导致
+  // users.length 恒为 undefined,"系统用户"永远显示兜底假数据 5
+  const [totals, setTotals] = useState({ users: 0, projects: 0, audits: 0 });
+
+  const loadData = () => {
     Promise.all([
-      auditLogApi.list({ page: 1, size: 10 }).catch(() => ({ data: { records: [] } })),
-      projectApi.list({ page: 1, size: 50 }).catch(() => ({ data: { records: [] } })),
-      userApi.list().catch(() => ({ data: [] })),
+      auditLogApi.list({ pageNum: 1, pageSize: 10 }).catch(() => ({ data: { records: [], total: 0 } })),
+      projectApi.list({ pageNum: 1, pageSize: 50 }).catch(() => ({ data: { records: [], total: 0 } })),
+      userApi.list({ pageNum: 1, pageSize: 1 }).catch(() => ({ data: { records: [], total: 0 } })),
     ]).then(([logRes, projRes, userRes]) => {
-      setAuditLogs(logRes.data?.records || logRes.data || []);
-      setProjects(projRes.data?.records || projRes.data || []);
-      setUsers(userRes.data || []);
+      const logs = logRes.data?.records || logRes.data || [];
+      const projs = projRes.data?.records || projRes.data || [];
+      setAuditLogs(logs);
+      setProjects(projs);
+      setUsers(userRes.data?.records || []);
+      setTotals({
+        users: Number(userRes.data?.total ?? 0),
+        projects: Number(projRes.data?.total ?? projs.length),
+        audits: Number(logRes.data?.total ?? logs.length),
+      });
     }).finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => { loadData(); }, []);
+  // 自动刷新：定时轮询 + 收到通知立即刷新
+  useDashboardAutoRefresh(loadData);
 
   const stats = [
-    { label: "系统用户", value: users.length || 5, icon: Users, color: "#0088ff", bg: "bg-blue-50", path: "/app/settings" },
-    { label: "项目总数", value: projects.length || 1, icon: FolderKanban, color: "#8b5cf6", bg: "bg-purple-50", path: "/app/projects" },
-    { label: "审计记录", value: auditLogs.length || 0, icon: Shield, color: "#f59e0b", bg: "bg-amber-50", path: "/app/audit" },
-    { label: "当前档位", value: levelInfo.label, icon: Activity, color: levelInfo.color, bg: "bg-emerald-50", path: "/app/settings" },
+    { label: "系统用户", value: totals.users, icon: Users, color: "#0088ff", bg: "bg-blue-50", path: "/app/settings" },
+    { label: "项目总数", value: totals.projects, icon: FolderKanban, color: "#8b5cf6", bg: "bg-purple-50", path: "/app/projects" },
+    { label: "审计记录", value: totals.audits, icon: Shield, color: "#f59e0b", bg: "bg-amber-50", path: "/app/audit" },
+    // 当前档位仅作展示,不提供跳转(path 为空)
+    { label: "当前档位", value: levelInfo.label, icon: Activity, color: levelInfo.color, bg: "bg-emerald-50", path: "" },
   ];
 
   const operationColors: Record<string, string> = {
@@ -61,9 +90,12 @@ export default function AdminDashboard() {
           <h2 className="text-xl font-bold text-foreground">今天也是高效的一天</h2>
           <p className="text-sm text-muted-foreground mt-1">万物归一，秩序自生 · 让每一次交付都值得信赖</p>
         </div>
-        <Button onClick={() => setLocation("/app/settings")} className="bg-[#0088ff] hover:bg-[#0066cc] text-white">
-          <Settings className="w-4 h-4 mr-1" /> 系统管理
-        </Button>
+        <div className="flex items-center gap-2">
+          <ExternalPortalQr />
+          <Button onClick={() => setLocation("/app/settings")} className="bg-[#0088ff] hover:bg-[#0066cc] text-white">
+            <Settings className="w-4 h-4 mr-1" /> 系统管理
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -74,8 +106,8 @@ export default function AdminDashboard() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.08 }}
-            onClick={() => setLocation(stat.path)}
-            className="bg-white rounded-xl border border-border/60 p-5 hover:shadow-md hover:shadow-[#0088ff]/5 transition-all duration-300 cursor-pointer group"
+            onClick={() => { if (stat.path) setLocation(stat.path); }}
+            className={`bg-white rounded-xl border border-border/60 p-5 transition-all duration-300 group ${stat.path ? "cursor-pointer hover:shadow-md hover:shadow-[#0088ff]/5" : "cursor-default"}`}
           >
             <div className="flex items-center justify-between">
               <div>

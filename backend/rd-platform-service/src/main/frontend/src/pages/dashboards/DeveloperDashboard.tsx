@@ -3,11 +3,13 @@ import { useState, useEffect } from "react";
 import { useLocation, Link } from "wouter";
 import { motion } from "framer-motion";
 import { Code2, Bug, CheckCircle2, Clock, AlertTriangle, ArrowRight, GitCommit } from "lucide-react";
-import { taskApi, bugApi } from "@/services/api";
+import { taskApi, bugApi, projectApi } from "@/services/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LogHoursDialog, CreateDebtDialog } from "@/components/dialogs";
 import MyTodoPanel from "@/components/MyTodoPanel";
+import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh";
 
 export default function DeveloperDashboard() {
   const { info } = useRole();
@@ -15,30 +17,53 @@ export default function DeveloperDashboard() {
   const [tasks, setTasks] = useState<any[]>([]);
   const [bugs, setBugs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  // 项目筛选：跨项目混计的统计无意义
+  const [projects, setProjects] = useState<any[]>([]);
+  const [projectId, setProjectId] = useState<string>("");
+  // 当前登录用户：开发工作台只统计"我的"任务与Bug
+  const currentUserId = (() => {
+    try { return JSON.parse(localStorage.getItem("taiyi_user") || "{}").userId; } catch { return undefined; }
+  })();
 
   // Dialog states
   const [logHoursOpen, setLogHoursOpen] = useState(false);
   const [createDebtOpen, setCreateDebtOpen] = useState(false);
 
-  useEffect(() => {
+  const loadData = () => {
+    const pid = projectId ? Number(projectId) : undefined;
     Promise.all([
-      taskApi.list({ page: 1, size: 50 }).catch(() => ({ data: { records: [] } })),
-      bugApi.list({ page: 1, size: 50 }).catch(() => ({ data: { records: [] } })),
+      // 按当前用户过滤：修复此前拉全员任务/Bug 冒充"我的"的问题
+      taskApi.list({ pageNum: 1, pageSize: 200, projectId: pid, assigneeId: currentUserId }).catch(() => ({ data: { records: [] } })),
+      bugApi.list({ pageNum: 1, pageSize: 200, projectId: pid, assigneeId: currentUserId }).catch(() => ({ data: { records: [] } })),
     ]).then(([taskRes, bugRes]) => {
       setTasks(taskRes.data?.records || taskRes.data || []);
       setBugs(bugRes.data?.records || bugRes.data || []);
     }).finally(() => setLoading(false));
+  };
+  useEffect(() => { loadData(); }, [projectId]);
+  // 自动刷新：定时轮询 + 收到通知立即刷新
+  useDashboardAutoRefresh(loadData);
+
+  useEffect(() => {
+    projectApi.list({ pageNum: 1, pageSize: 100 }).then((res: any) => {
+      const list = res?.data?.records || res?.data || [];
+      setProjects(Array.isArray(list) ? list : []);
+    }).catch(() => setProjects([]));
   }, []);
 
   const myTodoTasks = tasks.filter(t => t.status === "TODO" || t.status === "IN_PROGRESS");
   const myFixBugs = bugs.filter(b => b.status === "CONFIRMED" || b.status === "IN_PROGRESS");
   const completedTasks = tasks.filter(t => t.status === "DONE" || t.status === "CLOSED");
+  // 逾期预警：截止日早于今天且未完成的任务
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const overdueTasks = tasks.filter(t => t.dueDate && t.status !== "DONE" && t.status !== "CLOSED"
+    && new Date(t.dueDate) < today);
 
   const stats = [
     { label: "待处理任务", value: myTodoTasks.length, icon: Code2, color: "#0088ff", bg: "bg-blue-50", href: "/app/tasks" },
     { label: "待修复Bug", value: myFixBugs.length, icon: Bug, color: "#ef4444", bg: "bg-red-50", href: "/app/bugs" },
     { label: "已完成", value: completedTasks.length, icon: CheckCircle2, color: "#10b981", bg: "bg-emerald-50", href: "/app/tasks" },
-    { label: "逾期预警", value: 0, icon: AlertTriangle, color: "#f59e0b", bg: "bg-amber-50", href: "/app/tasks" },
+    { label: "逾期预警", value: overdueTasks.length, icon: AlertTriangle, color: "#f59e0b", bg: "bg-amber-50", href: "/app/tasks" },
   ];
 
   const statusConfig: Record<string, { label: string; color: string }> = {
@@ -71,6 +96,15 @@ export default function DeveloperDashboard() {
           <p className="text-sm text-muted-foreground mt-1">万物归一，秩序自生 · 让每一次交付都值得信赖</p>
         </div>
         <div className="flex items-center gap-2">
+          <Select value={projectId || "all"} onValueChange={(v) => setProjectId(v === "all" ? "" : v)}>
+            <SelectTrigger className="h-8 w-40 text-xs rounded-xl"><SelectValue placeholder="全部项目" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部项目</SelectItem>
+              {projects.map((p: any) => (
+                <SelectItem key={p.id} value={String(p.id)}>{p.projectName || p.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button
             variant="outline" className="h-8 text-xs rounded-xl"
             onClick={() => setLogHoursOpen(true)}

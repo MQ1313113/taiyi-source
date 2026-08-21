@@ -26,6 +26,8 @@ public class BizTicket {
     private String status;          // PENDING_TRIAGE/DISPATCHED/PROCESSING/RESOLVED/CLOSED
     private String convertedType;   // REQUIREMENT/BUG/TASK（分诊转换后）
     private Long convertedId;
+    private String contactInfo;     // 外部提交人联系方式(手机/邮箱/姓名),内部单为空
+    private String queryToken;      // 外部单进度查询码(随机),配合 ticketCode 公开查询
     private LocalDateTime slaDueAt;  // 落地时按优先级计算
     private Integer escalatedLevel;  // 0未升级/1责任人/2项目负责人/3管理员，防重复升级
     private LocalDateTime resolvedAt;

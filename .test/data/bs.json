@@ -1,0 +1,1 @@
+{"projectId":1,"title":"ST-标准档自由文本缺陷","description":"自由文本无复现步骤段","expectedResult":"ok","actualResult":"fail","severity":"MINOR","priority":"P2","moduleName":"st","assigneeId":4,"environment":"dev","frequency":"ALWAYS"}

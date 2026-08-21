@@ -186,16 +186,7 @@ public class RoleService {
     public Map<String, Object> myPermissions() {
         Long uid = SecurityContextHolder.getCurrentUserId();
         List<String> roleCodes = roleChecker.getRoleCodes(uid);
-        // sys_admin 返回全部权限
-        if (roleCodes.contains("sys_admin")) {
-            List<SysPermission> allPerms = permissionMapper.selectList(null);
-            List<String> codes = allPerms.stream().map(SysPermission::getPermissionCode).collect(Collectors.toList());
-            Map<String, Object> data = new HashMap<>();
-            data.put("roles", roleCodes);
-            data.put("permissions", codes);
-            return data;
-        }
-        // 查询用户所有角色的权限合集
+        // 查询用户所有角色的权限合集(sys_admin 同样按权限表返回,不再全量放行)
         List<SysUserRole> urs = userRoleMapper.selectList(
                 new LambdaQueryWrapper<SysUserRole>().eq(SysUserRole::getUserId, uid));
         Set<Long> permIdSet = new HashSet<>();
@@ -217,8 +208,10 @@ public class RoleService {
 
     // ============ 辅助方法 ============
     private boolean isBuiltIn(String roleCode) {
+        // support: 售后工程师; biz_arbiter: 业务仲裁(用户管理开关的落地角色,删了开关就失效)
         return "sys_admin".equals(roleCode) || "pm".equals(roleCode)
-                || "dev".equals(roleCode) || "qa".equals(roleCode);
+                || "dev".equals(roleCode) || "qa".equals(roleCode)
+                || "support".equals(roleCode) || "biz_arbiter".equals(roleCode);
     }
 
     private void saveRolePermissions(Long roleId, List<Long> permissionIds) {

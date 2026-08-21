@@ -2,11 +2,14 @@ package com.rd.platform.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.rd.platform.common.constant.BizConstants;
 import com.rd.platform.common.exception.BusinessException;
 import com.rd.platform.model.entity.BizChangeRequest;
 import com.rd.platform.model.entity.BizRequirement;
+import com.rd.platform.model.entity.SysConfig;
 import com.rd.platform.model.mapper.BizChangeRequestMapper;
 import com.rd.platform.model.mapper.BizRequirementMapper;
+import com.rd.platform.model.mapper.SysConfigMapper;
 import com.rd.platform.security.context.SecurityContextHolder;
 import lombok.Data;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,6 +31,33 @@ public class ChangeRequestService {
 
     @Autowired
     private BizRequirementMapper requirementMapper;
+
+    @Autowired
+    private SysConfigMapper sysConfigMapper;
+
+    /**
+     * 变更审批人池(可配置):sys_config[change.approver.ids] 存逗号分隔的用户ID。
+     * 配置后,双重审批的两位审批人必须来自池内(防自审与双人不同规则不变),
+     * 解决小团队"PM+负责人+防自审"组合凑不齐合法审批人的死锁;未配置时回退角色规则。
+     */
+    private java.util.Set<Long> approverPool() {
+        SysConfig cfg = sysConfigMapper.selectOne(
+                new LambdaQueryWrapper<SysConfig>().eq(SysConfig::getConfigKey, "change.approver.ids"));
+        java.util.Set<Long> pool = new java.util.HashSet<>();
+        if (cfg != null && cfg.getConfigValue() != null) {
+            for (String s : cfg.getConfigValue().split("[,，\\s]+")) {
+                try { if (!s.isEmpty()) pool.add(Long.parseLong(s.trim())); } catch (NumberFormatException ignored) { }
+            }
+        }
+        return pool;
+    }
+
+    /** 当前用户是否具备审批资格:配置了池则看池(admin 始终兜底),未配置回退角色规则 */
+    private boolean canApprove(Long userId, java.util.Set<Long> pool, boolean fallbackAllowed) {
+        if (roleChecker.hasPermission(userId, "biz:override")) return true; // 业务仲裁兜底(默认项目经理,可配置)
+        if (!pool.isEmpty()) return pool.contains(userId);
+        return fallbackAllowed;
+    }
 
     @Autowired
     private RoleChecker roleChecker;
@@ -71,6 +101,15 @@ public class ChangeRequestService {
         if (!roleChecker.hasPermission(currentUserId, "change:create")) {
             throw BusinessException.forbidden("只有产品经理可以发起需求变更");
         }
+        // 已关闭/已取消的需求不可变更:需求生命周期已终结,调整应新建需求走完整流程
+        BizRequirement targetReq = requirementMapper.selectById(request.getRequirementId());
+        if (targetReq == null) throw BusinessException.badRequest("关联的需求不存在");
+        if (BizConstants.REQ_CLOSED.equals(targetReq.getStatus())
+                || BizConstants.REQ_CANCELLED.equals(targetReq.getStatus())) {
+            throw BusinessException.badRequest("需求已" +
+                    (BizConstants.REQ_CLOSED.equals(targetReq.getStatus()) ? "关闭" : "取消") +
+                    ",不支持发起变更;如需调整请新建需求");
+        }
         BizChangeRequest cr = new BizChangeRequest();
         cr.setRequirementId(request.getRequirementId());
         cr.setProjectId(request.getProjectId());
@@ -109,10 +148,15 @@ public class ChangeRequestService {
         BizRequirement req = requirementMapper.selectById(cr.getRequirementId());
         Long ownerId = req != null ? req.getOwnerId() : null;
 
+        java.util.Set<Long> pool = approverPool();
+
         if (ST_PENDING.equals(cr.getStatus())) {
-            // 第一重：产品经理审批
-            if (!roleChecker.hasPermission(currentUserId, "change:approve")) {
-                throw BusinessException.forbidden("第一重审批须由产品经理完成");
+            // 第一重：配置了审批人池则以池为准,否则回退"产品经理"角色规则
+            if (!canApprove(currentUserId, pool,
+                    roleChecker.hasPermission(currentUserId, "change:approve"))) {
+                throw BusinessException.forbidden(pool.isEmpty()
+                        ? "第一重审批须由产品经理完成"
+                        : "第一重审批须由配置的变更审批人完成(系统设置-变更审批人池)");
             }
             cr.setStatus(ST_PM_APPROVED);
             cr.setApproverId(currentUserId);
@@ -129,8 +173,11 @@ public class ChangeRequestService {
                 throw BusinessException.forbidden("第二重审批人不能与第一重审批人相同（双人双审）");
             }
             boolean isOwner = ownerId != null && ownerId.equals(currentUserId);
-            if (!isOwner && !roleChecker.hasPermission(currentUserId, "change:approve")) {
-                throw BusinessException.forbidden("第二重复审须由需求负责人或产品经理完成");
+            if (!canApprove(currentUserId, pool,
+                    isOwner || roleChecker.hasPermission(currentUserId, "change:approve"))) {
+                throw BusinessException.forbidden(pool.isEmpty()
+                        ? "第二重复审须由需求负责人或产品经理完成"
+                        : "第二重复审须由配置的变更审批人完成(系统设置-变更审批人池)");
             }
             cr.setStatus(ST_APPROVED);
             cr.setApprovedAt(LocalDateTime.now());

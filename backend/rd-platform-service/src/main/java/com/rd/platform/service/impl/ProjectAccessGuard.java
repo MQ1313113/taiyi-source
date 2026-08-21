@@ -35,6 +35,18 @@ public class ProjectAccessGuard {
     private RoleChecker roleChecker;
 
     /** 是否系统管理员（数据不设范围）。 */
+    /**
+     * 个人项目直通判定:项目为 PRIVATE 且操作人=负责人。
+     * 私有项目是个人留痕本(测试测外部硬件/开发做组件),岗位实体免协作依赖:
+     * 任务免拆解与QA验收、用例免关联需求与证据、缺陷免防自审——防御对象(他人)不存在。
+     */
+    public boolean isPrivateOwner(Long userId, Long projectId) {
+        if (userId == null || projectId == null) return false;
+        BizProject p = projectMapper.selectById(projectId);
+        return p != null && "PRIVATE".equals(p.getVisibility())
+                && userId.equals(p.getOwnerId());
+    }
+
     public boolean isAdmin(Long userId) {
         return userId != null && roleChecker.getRoleCodes(userId).contains("sys_admin");
     }

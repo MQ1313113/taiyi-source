@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
+import { getThemeMode, setThemeMode, type ThemeMode } from "@/lib/theme";
 import { motion } from "framer-motion";
-import { Settings, User, Palette, Shield, Users, Puzzle, Plus, Search, MoreHorizontal, Loader2, Pencil, Trash2, Check, X } from "lucide-react";
+import { Settings, Palette, Shield, Users, Puzzle, Plus, Search, MoreHorizontal, Loader2, Pencil, Trash2, Check, X, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,13 +11,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
-import { useRole } from "@/contexts/RoleContext";
 import { userApi, roleApi, systemConfigApi } from "@/services/api";
 
+// 个人信息不在系统设置里:它是每个人自己的事,入口在右上角用户菜单(所有角色可用)
 const tabs = [
   { id: "users", label: "用户管理", icon: Users },
   { id: "roles", label: "角色权限", icon: Shield },
-  { id: "profile", label: "个人信息", icon: User },
   { id: "appearance", label: "外观主题", icon: Palette },
   { id: "extensions", label: "扩展配置", icon: Puzzle },
 ];
@@ -31,10 +31,7 @@ const roleColorMap: Record<string, string> = {
 const getColorForRole = (code: string) => roleColorMap[code] || "#6b7280";
 
 export default function SettingsPage() {
-  const { role } = useRole();
   const [activeTab, setActiveTab] = useState("users");
-  const [profile, setProfile] = useState({ name: "王超", email: "admin@taiyi.dev", phone: "138****8888" });
-
 
   // User management state
   const [users, setUsers] = useState<any[]>([]);
@@ -49,7 +46,14 @@ export default function SettingsPage() {
   const [editingUser, setEditingUser] = useState<any>(null);
   const [resetPwdDialogOpen, setResetPwdDialogOpen] = useState(false);
   const [resetPwdUser, setResetPwdUser] = useState<any>(null);
+  // 授权开关确认弹窗:kind=arbiter(业务仲裁)/approver(变更审批),{user, enabled} 为待确认的目标状态
+  const [arbiterConfirm, setArbiterConfirm] = useState<{ user: any; enabled: boolean; kind: "arbiter" | "approver" } | null>(null);
+  const [savingArbiter, setSavingArbiter] = useState(false);
   const [newPassword, setNewPassword] = useState("");
+  // 防浏览器密码管理器接管:密码框初始 readOnly,用户聚焦才解锁(Chrome 不向 readOnly 输入框回填密码)
+  const [pwdReadOnly, setPwdReadOnly] = useState(true);
+  const [showResetPwd, setShowResetPwd] = useState(false);
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(() => getThemeMode());
 
   // Role management state
   const [roles, setRoles] = useState<any[]>([]);
@@ -68,7 +72,8 @@ export default function SettingsPage() {
   const fetchUsers = async () => {
     setLoadingUsers(true);
     try {
-      const res = await userApi.listWithRoles();
+      // 用户管理场景：包含系统管理员，否则 admin 被赋 sys_admin 角色后从列表消失
+      const res = await userApi.listWithRoles(true);
       setUsers(res.data || []);
     } catch {
       setUsers([]);
@@ -99,7 +104,10 @@ export default function SettingsPage() {
   };
 
   useEffect(() => {
-    if (activeTab === "users") fetchUsers();
+    if (activeTab === "users") {
+      fetchUsers();
+      fetchRoles(); // 新建/编辑用户弹窗的角色下拉依赖 roles,首次进入用户页签也要加载
+    }
     if (activeTab === "roles") {
       fetchRoles();
       fetchPermissions();
@@ -129,6 +137,38 @@ export default function SettingsPage() {
       toast.error("创建失败", { description: err?.response?.data?.message || "请检查用户名是否重复" });
     } finally {
       setCreating(false);
+    }
+  };
+
+  // 提交授权开关变更(业务仲裁/变更审批共用,唯一授权入口,后端拦 admin/禁用账号)
+  const confirmArbiter = async () => {
+    if (!arbiterConfirm) return;
+    const isArb = arbiterConfirm.kind === "arbiter";
+    const label = isArb ? "业务仲裁" : "变更审批";
+    setSavingArbiter(true);
+    try {
+      const res: any = isArb
+        ? await userApi.setArbiter(arbiterConfirm.user.id, arbiterConfirm.enabled)
+        : await userApi.setChangeApprover(arbiterConfirm.user.id, arbiterConfirm.enabled);
+      const d = res?.data || {};
+      const title = `${arbiterConfirm.enabled ? "已开启" : "已关闭"}${label}`;
+      if (d.warning) {
+        toast.warning(title, { description: d.warning });
+      } else if (d.note) {
+        toast.info(title, { description: d.note });
+      } else {
+        toast.success(title, {
+          description: isArb
+            ? `当前共 ${d.holderCount ?? "-"} 人持有业务仲裁权限`
+            : `审批人池当前共 ${d.poolCount ?? "-"} 人(名单制生效中)`,
+        });
+      }
+      setArbiterConfirm(null);
+      fetchUsers();
+    } catch (err: any) {
+      toast.error("操作失败", { description: err?.message || err?.response?.data?.message || "请稍后重试" });
+    } finally {
+      setSavingArbiter(false);
     }
   };
 
@@ -238,6 +278,9 @@ export default function SettingsPage() {
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
+                type="search"
+                autoComplete="off"
+                name="user-list-filter"
                 placeholder="搜索用户名、昵称、邮箱..."
                 className="pl-9 rounded-xl"
                 value={searchKeyword}
@@ -284,6 +327,18 @@ export default function SettingsPage() {
                           ) : (
                             <Badge variant="outline" className="text-[10px] border-red-200 text-red-600">禁用</Badge>
                           )}
+                          {user.bizArbiter && (
+                            <Badge className="text-[10px] bg-amber-100 text-amber-700 border border-amber-200">业务仲裁</Badge>
+                          )}
+                          {user.changeApprover && (
+                            <Badge className="text-[10px] bg-blue-100 text-blue-700 border border-blue-200">变更审批</Badge>
+                          )}
+                          {user.username === "guest" && (
+                            <Badge variant="outline" className="text-[10px] border-slate-300 text-slate-500"
+                              title="外部匿名工单的提报人占位账号:必须保持禁用,不可删除,重启后自动重建">
+                              系统账号
+                            </Badge>
+                          )}
                         </div>
                         <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
                           <span>用户名: {user.username}</span>
@@ -291,6 +346,25 @@ export default function SettingsPage() {
                           {user.lastLoginTime && <span>最后登录: {new Date(user.lastLoginTime).toLocaleString("zh-CN")}</span>}
                         </div>
                       </div>
+                      {/* 授权开关:admin(系统职能纯粹)与 guest(外部占位)不展示;禁用账号只可关不可开(后端同拦) */}
+                      {user.username !== "admin" && user.username !== "guest" && (
+                        <div className="flex items-center gap-3 shrink-0">
+                          <div className="flex items-center gap-1.5" title="流程卡死时的兜底裁决权,可与当前岗位叠加,可多人持有">
+                            <span className="text-[11px] text-muted-foreground">仲裁</span>
+                            <Switch
+                              checked={!!user.bizArbiter}
+                              onCheckedChange={(v) => setArbiterConfirm({ user, enabled: v, kind: "arbiter" })}
+                            />
+                          </div>
+                          <div className="flex items-center gap-1.5" title="变更审批名单:开了任何人后,需求变更的两重审批必须由名单内成员完成;全关则回退默认角色规则(产品经理审批)">
+                            <span className="text-[11px] text-muted-foreground">审批</span>
+                            <Switch
+                              checked={!!user.changeApprover}
+                              onCheckedChange={(v) => setArbiterConfirm({ user, enabled: v, kind: "approver" })}
+                            />
+                          </div>
+                        </div>
+                      )}
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="sm" className="text-muted-foreground">
@@ -307,12 +381,15 @@ export default function SettingsPage() {
                           <DropdownMenuItem onClick={() => {
                             setResetPwdUser(user);
                             setNewPassword("");
+                            setPwdReadOnly(true);
+                            setShowResetPwd(false);
                             setResetPwdDialogOpen(true);
                           }}>
                             重置密码
                           </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
+                          {/* admin 防锁死、guest 系统占位:禁用/删除入口不展示（后端同样拦截） */}
+                          {user.username !== 'admin' && user.username !== 'guest' && <DropdownMenuSeparator />}
+                          {user.username !== 'admin' && user.username !== 'guest' && <DropdownMenuItem
                             className={user.status === 1 ? "text-red-600" : "text-green-600"}
                             onClick={async () => {
                               try {
@@ -325,14 +402,10 @@ export default function SettingsPage() {
                             }}
                           >
                             {user.status === 1 ? "禁用账号" : "启用账号"}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
+                          </DropdownMenuItem>}
+                          {user.username !== 'admin' && user.username !== 'guest' && <DropdownMenuItem
                             className="text-red-600"
                             onClick={async () => {
-                              if (user.username === 'admin') {
-                                toast.error("不能删除系统管理员账号");
-                                return;
-                              }
                               if (!confirm(`确定要删除用户「${user.nickname || user.username}」吗？此操作不可恢复。`)) return;
                               try {
                                 await userApi.delete(user.id);
@@ -344,7 +417,7 @@ export default function SettingsPage() {
                             }}
                           >
                             删除用户
-                          </DropdownMenuItem>
+                          </DropdownMenuItem>}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
@@ -358,6 +431,14 @@ export default function SettingsPage() {
               <span>共 {filteredUsers.length} 位用户</span>
               <span>活跃: {filteredUsers.filter(u => u.status === 1).length}</span>
               <span>禁用: {filteredUsers.filter(u => u.status !== 1).length}</span>
+              <span className={users.filter(u => u.bizArbiter).length === 0 ? "text-red-500 font-medium" : "text-amber-600"}>
+                业务仲裁: {users.filter(u => u.bizArbiter).length} 人{users.filter(u => u.bizArbiter).length === 0 ? "(未配置,流程卡死时将无人裁决)" : ""}
+              </span>
+              <span className="text-blue-600">
+                变更审批: {users.filter(u => u.changeApprover).length > 0
+                  ? `${users.filter(u => u.changeApprover).length} 人(名单制)`
+                  : "角色制(产品经理)"}
+              </span>
             </div>
           </div>
         );
@@ -481,56 +562,25 @@ export default function SettingsPage() {
           </div>
         );
 
-      case "profile":
-        return (
-          <div className="space-y-6">
-            <h3 className="text-sm font-semibold">个人信息</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>姓名</Label>
-                <Input value={profile.name} onChange={(e) => setProfile({...profile, name: e.target.value})} />
-              </div>
-              <div className="space-y-2">
-                <Label>邮箱</Label>
-                <Input value={profile.email} onChange={(e) => setProfile({...profile, email: e.target.value})} />
-              </div>
-              <div className="space-y-2">
-                <Label>手机号</Label>
-                <Input value={profile.phone} onChange={(e) => setProfile({...profile, phone: e.target.value})} />
-              </div>
-              <div className="space-y-2">
-                <Label>当前角色</Label>
-                <Input value={role || "系统管理员"} disabled className="bg-muted" />
-              </div>
-            </div>
-            <Button className="bg-[#0088ff] hover:bg-[#0066cc] text-white" onClick={() => toast.success("个人信息已保存")}>保存修改</Button>
-          </div>
-        );
       case "appearance":
         return (
           <div className="space-y-6">
             <h3 className="text-sm font-semibold">外观主题</h3>
             <div className="grid grid-cols-3 gap-4">
-              {[
+              {([
                 { id: "light", label: "浅色模式", desc: "白玉晨曦" },
                 { id: "dark", label: "深色模式", desc: "暗夜星辰" },
                 { id: "auto", label: "跟随系统", desc: "自动切换" },
-              ].map(theme => (
-                <div key={theme.id} className={`p-4 rounded-xl border cursor-pointer transition-all hover:shadow-md ${theme.id === "light" ? "border-[#0088ff] ring-1 ring-[#0088ff]/20" : "border-border/60"}`}>
+              ] as { id: ThemeMode; label: string; desc: string }[]).map(theme => (
+                <div key={theme.id}
+                  onClick={() => { setThemeModeState(theme.id); setThemeMode(theme.id); toast.success(`已切换为${theme.label}`); }}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all hover:shadow-md ${theme.id === themeMode ? "border-[#0088ff] ring-1 ring-[#0088ff]/20" : "border-border/60"}`}>
                   <p className="text-sm font-medium">{theme.label}</p>
                   <p className="text-xs text-muted-foreground mt-1">{theme.desc}</p>
                 </div>
               ))}
             </div>
-            <h3 className="text-sm font-semibold mt-6">语言设置</h3>
-            <Select defaultValue="zh-CN">
-              <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="zh-CN">简体中文</SelectItem>
-                <SelectItem value="en-US">English</SelectItem>
-                <SelectItem value="ja-JP">日本語</SelectItem>
-              </SelectContent>
-            </Select>
+            {/* 语言设置暂不提供:全站文案未做 i18n 抽取,切换语言不会生效,避免展示无效开关 */}
           </div>
         );
       case "extensions":
@@ -591,7 +641,7 @@ export default function SettingsPage() {
               </div>
               <div className="space-y-2">
                 <Label className="text-sm font-medium">初始密码 <span className="text-red-500">*</span></Label>
-                <Input type="password" placeholder="设置初始密码" className="rounded-xl h-10" value={newUser.password}
+                <Input type="password" autoComplete="new-password" placeholder="设置初始密码" className="rounded-xl h-10" value={newUser.password}
                   onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
               </div>
             </div>
@@ -606,7 +656,8 @@ export default function SettingsPage() {
                 <Select value={newUser.roleId} onValueChange={(v) => setNewUser({ ...newUser, roleId: v })}>
                   <SelectTrigger className="rounded-xl h-10"><SelectValue placeholder="选择角色" /></SelectTrigger>
                   <SelectContent>
-                    {roles.map(r => (
+                    {/* 业务仲裁不是岗位角色,不进常规角色下拉,授予只走用户行的仲裁开关 */}
+                    {roles.filter(r => r.roleCode !== "biz_arbiter").map(r => (
                       <SelectItem key={r.id} value={r.id.toString()}>{r.roleName}</SelectItem>
                     ))}
                   </SelectContent>
@@ -670,11 +721,13 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>角色</Label>
-                <Select value={String(editingUser.roleId || "")} onValueChange={(v) => setEditingUser({ ...editingUser, roleId: v })}>
+                <Label>角色{editingUser.username === "admin" && <span className="text-xs text-muted-foreground ml-2">(系统管理员账号不可修改角色)</span>}</Label>
+                <Select value={String(editingUser.roleId || "")} disabled={editingUser.username === "admin"}
+                  onValueChange={(v) => setEditingUser({ ...editingUser, roleId: v })}>
                   <SelectTrigger className="rounded-xl"><SelectValue placeholder="选择角色" /></SelectTrigger>
                   <SelectContent>
-                    {roles.map(r => (
+                    {/* 业务仲裁不是岗位角色,不进常规角色下拉,授予只走用户行的仲裁开关 */}
+                    {roles.filter(r => r.roleCode !== "biz_arbiter").map(r => (
                       <SelectItem key={r.id} value={r.id.toString()}>{r.roleName}</SelectItem>
                     ))}
                   </SelectContent>
@@ -691,7 +744,8 @@ export default function SettingsPage() {
                     nickname: editingUser.nickname,
                     email: editingUser.email,
                     phone: editingUser.phone,
-                    roleIds: editingUser.roleId ? [Number(editingUser.roleId)] : undefined,
+                    // admin 角色固定为系统管理员,不提交 roleIds(后端也会拒绝对 admin 的角色修改)
+                    roleIds: editingUser.username !== "admin" && editingUser.roleId ? [Number(editingUser.roleId)] : undefined,
                   });
                   toast.success("用户信息已更新");
                   setEditDialogOpen(false);
@@ -705,17 +759,32 @@ export default function SettingsPage() {
       </Dialog>
 
       {/* Reset Password Dialog */}
-      <Dialog open={resetPwdDialogOpen} onOpenChange={setResetPwdDialogOpen}>
+      <Dialog open={resetPwdDialogOpen} onOpenChange={(o) => { setResetPwdDialogOpen(o); if (!o) setSearchKeyword(""); }}>
         <DialogContent className="sm:max-w-[400px] rounded-2xl border-border/60 shadow-xl">
           <DialogHeader>
             <DialogTitle>重置密码</DialogTitle>
             <DialogDescription>为用户 {resetPwdUser?.nickname || resetPwdUser?.username} 设置新密码</DialogDescription>
           </DialogHeader>
+          {/* 诱饵输入框:吸收 Chrome 密码管理器的自动填充(它会无视 autoComplete=off),使真实输入框保持干净 */}
+          <input type="text" name="fake-user" autoComplete="username" tabIndex={-1} aria-hidden="true"
+            style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }} />
+          <input type="password" name="fake-pwd" autoComplete="current-password" tabIndex={-1} aria-hidden="true"
+            style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }} />
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>新密码 <span className="text-red-500">*</span></Label>
-              <Input type="password" placeholder="输入新密码" className="rounded-xl" value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)} />
+              <div className="relative">
+                {/* readOnly 直到用户聚焦:Chrome 不向 readOnly 输入框回填保存的密码 */}
+                <Input type={showResetPwd ? "text" : "password"} autoComplete="new-password" name={"np-" + (resetPwdUser?.id ?? "x")}
+                  readOnly={pwdReadOnly} onFocus={() => setPwdReadOnly(false)}
+                  placeholder="输入新密码" className="rounded-xl pr-10" value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)} />
+                <button type="button" tabIndex={-1}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={() => setShowResetPwd(!showResetPwd)}>
+                  {showResetPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
           </div>
           <DialogFooter className="gap-2">
@@ -727,8 +796,73 @@ export default function SettingsPage() {
                   await userApi.resetPassword(resetPwdUser.id, newPassword);
                   toast.success("密码已重置");
                   setResetPwdDialogOpen(false);
+                  // 兜底:浏览器自动填充可能把用户名塞进搜索框导致列表被过滤,关弹窗时强制清空
+                  setSearchKeyword("");
                 } catch { toast.error("重置失败"); }
               }}>确认重置</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 业务仲裁开关确认弹窗:说清这是什么权力再让管理员拍板 */}
+      <Dialog open={!!arbiterConfirm} onOpenChange={(o) => !o && setArbiterConfirm(null)}>
+        <DialogContent className="sm:max-w-[440px] rounded-2xl border-border/60 shadow-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Shield className={`w-5 h-5 ${arbiterConfirm?.kind === "approver" ? "text-blue-500" : "text-amber-500"}`} />
+              {arbiterConfirm?.enabled ? "开启" : "关闭"}{arbiterConfirm?.kind === "approver" ? "变更审批" : "业务仲裁"} · {arbiterConfirm?.user?.nickname || arbiterConfirm?.user?.username}
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-2 pt-2 text-sm text-muted-foreground">
+                {arbiterConfirm?.kind === "approver" ? (
+                  <>
+                    <p>
+                      变更审批名单控制<span className="text-foreground font-medium">谁能审批需求变更</span>:
+                      名单内有人时,变更的两重审批(一审+复审)都必须由名单内成员完成;名单全空则回退默认角色规则(产品经理一审+需求负责人复审)。
+                    </p>
+                    {arbiterConfirm?.enabled ? (
+                      <p>
+                        加入后该用户可参与变更审批(防自审、两重不得同人的规则不变)。
+                        注意:名单一旦有人,不在名单内的产品经理将不能再审批变更。
+                      </p>
+                    ) : (
+                      <p className="text-blue-600">
+                        移出后该用户不再能审批变更。若名单因此清空,变更审批自动回退角色制,不会卡流程。
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p>
+                      业务仲裁是<span className="text-foreground font-medium">流程卡死时的兜底裁决权</span>:
+                      可越过常规角色限制推进/裁决需求、缺陷、变更审批与超时工单。
+                    </p>
+                    {arbiterConfirm?.enabled ? (
+                      <p>
+                        与该用户当前岗位({arbiterConfirm?.user?.roleName || "未分配"})叠加,不影响其原有职责。
+                        可多人持有,任一持有人均可裁决;建议保持至少 2 人以防休假/离职时无人可裁。
+                      </p>
+                    ) : (
+                      <p className="text-amber-600">
+                        关闭后该用户不再能做兜底裁决。若这是最后一位持有人,流程卡死时将无人可裁决,
+                        admin 工作台会出现常驻提醒,请及时指定新的仲裁人。
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" className="rounded-xl" onClick={() => setArbiterConfirm(null)}>取消</Button>
+            <Button
+              className={`rounded-xl text-white ${arbiterConfirm?.enabled ? "bg-amber-500 hover:bg-amber-600" : "bg-red-500 hover:bg-red-600"}`}
+              disabled={savingArbiter}
+              onClick={confirmArbiter}
+            >
+              {savingArbiter && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              确认{arbiterConfirm?.enabled ? "开启" : "关闭"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -942,7 +1076,8 @@ function SessionConfigPanel() {
     setLoading(true);
     try {
       const res = await systemConfigApi.list("security");
-      setConfigs(res?.data || []);
+      // 变更审批人池不在这里手填ID:唯一入口是[用户管理]每行的"审批"开关
+      setConfigs((res?.data || []).filter((c: any) => c.configKey !== "change.approver.ids"));
     } catch { setConfigs([]); }
     setLoading(false);
   };
@@ -984,12 +1119,11 @@ function SessionConfigPanel() {
                   {editingKey === cfg.configKey ? (
                     <>
                       <Input
-                        className="w-24 h-8 text-sm"
+                        className={cfg.configKey === "token.expiration.hours" ? "w-24 h-8 text-sm" : "w-48 h-8 text-sm"}
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
-                        type="number"
-                        min={1}
-                        max={168}
+                        type={cfg.configKey === "token.expiration.hours" ? "number" : "text"}
+                        placeholder={cfg.configKey === "change.approver.ids" ? "如: 3,6,7" : undefined}
                       />
                       <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => handleSave(cfg.configKey)}>
                         <Check className="w-4 h-4 text-green-500" />

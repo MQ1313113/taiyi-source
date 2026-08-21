@@ -44,7 +44,8 @@ export function useNotificationWebSocket({ onNotification, enabled = true }: Use
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const connect = useCallback(() => {
-    const token = localStorage.getItem("token");
+    // 注意键名是 taiyi_token(此前误写为 "token" 导致 WS 从未连接,通知只靠轮询兜底)
+    const token = localStorage.getItem("taiyi_token");
     if (!token || !enabled) return;
 
     // 确定WebSocket URL

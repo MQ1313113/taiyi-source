@@ -49,6 +49,9 @@ export default function GlobalNotificationToast() {
   }, [fetchUnreadCount]);
 
   const handleNotification = useCallback((notification: NotificationMessage) => {
+    // 广播全局事件：工作台等页面监听此事件立即刷新数据
+    window.dispatchEvent(new CustomEvent("taiyi-notification", { detail: notification }));
+
     // 播放提示音
     playNotificationSound();
 
@@ -84,10 +87,10 @@ export default function GlobalNotificationToast() {
     setToasts(prev => prev.filter(t => t.id !== toastId));
   }, []);
 
-  // WebSocket连接
+  // WebSocket连接(键名 taiyi_token,此前误写 "token" 导致推送从未启用)
   useNotificationWebSocket({
     onNotification: handleNotification,
-    enabled: !!localStorage.getItem("token"),
+    enabled: !!localStorage.getItem("taiyi_token"),
   });
 
   // 暴露unreadCount到全局，供顶部导航使用

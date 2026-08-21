@@ -5,7 +5,11 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.rd.platform.common.constant.BizConstants;
 import com.rd.platform.common.exception.BusinessException;
 import com.rd.platform.model.entity.BizSprint;
+import com.rd.platform.model.entity.BizTechDebt;
+import com.rd.platform.model.entity.SysConfig;
 import com.rd.platform.model.mapper.BizSprintMapper;
+import com.rd.platform.model.mapper.BizTechDebtMapper;
+import com.rd.platform.model.mapper.SysConfigMapper;
 import com.rd.platform.security.context.SecurityContextHolder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -24,11 +28,83 @@ public class SprintService {
     @Autowired
     private BizSprintMapper sprintMapper;
     @Autowired
+    private BizTechDebtMapper techDebtMapper;
+    @Autowired
+    private SysConfigMapper sysConfigMapper;
+    @Autowired
     private ProjectAccessGuard projectAccessGuard;
     @Autowired
     private RoleChecker roleChecker;
     @Autowired
     private SprintCapacityGuard sprintCapacityGuard;
+    @Autowired
+    private com.rd.platform.model.mapper.BizRequirementMapper requirementMapper;
+    @Autowired
+    private com.rd.platform.model.mapper.BizTaskMapper taskMapper;
+
+    /**
+     * 关闭迭代(带未完成项强制处置)：
+     * 迭代内存在未完成需求/任务时,必须明确处置策略——顺延到指定迭代(MOVE_TO_SPRINT)或退回待办池(BACKLOG),
+     * 不提供默认值,杜绝"迭代一关,没做完的活就消失"的烂尾;关闭瞬间快照计划数/完成数,沉淀迭代完成率。
+     */
+    public String complete(Long id, String unfinishedAction, Long targetSprintId) {
+        BizSprint sprint = mustGet(id);
+        requirePermission("关闭迭代", "sprint:edit");
+        projectAccessGuard.assertAccess(SecurityContextHolder.getCurrentUserId(), sprint.getProjectId(), "迭代");
+        if (!isValidSprintTransition(sprint.getStatus(), BizConstants.SPRINT_COMPLETED)) {
+            throw BusinessException.badRequest("非法的迭代状态流转：" + sprint.getStatus() + " → COMPLETED");
+        }
+
+        List<com.rd.platform.model.entity.BizRequirement> reqs = requirementMapper.selectList(
+                new LambdaQueryWrapper<com.rd.platform.model.entity.BizRequirement>()
+                        .eq(com.rd.platform.model.entity.BizRequirement::getSprintId, id));
+        List<com.rd.platform.model.entity.BizTask> tasks = taskMapper.selectList(
+                new LambdaQueryWrapper<com.rd.platform.model.entity.BizTask>()
+                        .eq(com.rd.platform.model.entity.BizTask::getSprintId, id));
+        long unfinishedReq = reqs.stream().filter(r ->
+                !BizConstants.REQ_CLOSED.equals(r.getStatus()) && !BizConstants.REQ_CANCELLED.equals(r.getStatus())).count();
+        long unfinishedTask = tasks.stream().filter(t -> !BizConstants.TASK_DONE.equals(t.getStatus())).count();
+
+        if (unfinishedReq + unfinishedTask > 0) {
+            if (!"MOVE_TO_SPRINT".equals(unfinishedAction) && !"BACKLOG".equals(unfinishedAction)) {
+                throw BusinessException.badRequest("迭代内还有 " + unfinishedReq + " 个未完成需求、" + unfinishedTask
+                        + " 个未完成任务,关闭前必须选择处置方式：顺延到指定迭代(MOVE_TO_SPRINT+targetSprintId) 或 退回待办池(BACKLOG)");
+            }
+            Long newSprintId = null;
+            if ("MOVE_TO_SPRINT".equals(unfinishedAction)) {
+                if (targetSprintId == null || targetSprintId.equals(id)) {
+                    throw BusinessException.badRequest("顺延目标迭代无效");
+                }
+                BizSprint target = mustGet(targetSprintId);
+                if (BizConstants.SPRINT_COMPLETED.equals(target.getStatus())) {
+                    throw BusinessException.badRequest("不能顺延到已完成的迭代");
+                }
+                newSprintId = targetSprintId;
+            }
+            for (com.rd.platform.model.entity.BizRequirement r : reqs) {
+                if (!BizConstants.REQ_CLOSED.equals(r.getStatus()) && !BizConstants.REQ_CANCELLED.equals(r.getStatus())) {
+                    r.setSprintId(newSprintId);
+                    requirementMapper.updateById(r);
+                }
+            }
+            for (com.rd.platform.model.entity.BizTask t : tasks) {
+                if (!BizConstants.TASK_DONE.equals(t.getStatus())) {
+                    t.setSprintId(newSprintId);
+                    taskMapper.updateById(t);
+                }
+            }
+        }
+
+        // 完成率快照
+        sprint.setPlannedCount(reqs.size());
+        sprint.setDoneCount((int) reqs.stream().filter(r -> BizConstants.REQ_CLOSED.equals(r.getStatus())).count());
+        sprint.setStatus(BizConstants.SPRINT_COMPLETED);
+        sprintMapper.updateById(sprint);
+        String moved = unfinishedReq + unfinishedTask > 0
+                ? ("," + (("BACKLOG".equals(unfinishedAction)) ? "未完成项已退回待办池" : "未完成项已顺延到迭代#" + targetSprintId))
+                : "";
+        return "迭代已完成(需求 " + sprint.getDoneCount() + "/" + sprint.getPlannedCount() + ")" + moved;
+    }
 
     private void requirePermission(String action, String... permissions) {
         if (!roleChecker.hasPermission(SecurityContextHolder.getCurrentUserId(), permissions)) {
@@ -108,8 +184,35 @@ public class SprintService {
         if (!isValidSprintTransition(sprint.getStatus(), targetStatus)) {
             throw BusinessException.badRequest("非法的迭代状态流转：" + sprint.getStatus() + " → " + targetStatus + "，禁止越级跳转");
         }
+        // 债务闸门：启动迭代前,项目未偿还技术债存量超过阈值(sys_config: debt.max.hours,0=不限)则拦截,
+        // 逼团队先排债再开新活——债务只记不还会持续侵蚀交付质量
+        if (BizConstants.SPRINT_IN_PROGRESS.equals(targetStatus)) {
+            assertDebtUnderThreshold(sprint.getProjectId());
+        }
         sprint.setStatus(targetStatus);
         sprintMapper.updateById(sprint);
+    }
+
+    private void assertDebtUnderThreshold(Long projectId) {
+        SysConfig cfg = sysConfigMapper.selectOne(new LambdaQueryWrapper<SysConfig>()
+                .eq(SysConfig::getConfigKey, "debt.max.hours"));
+        double max = 40;
+        if (cfg != null && cfg.getConfigValue() != null) {
+            try { max = Double.parseDouble(cfg.getConfigValue().trim()); } catch (NumberFormatException ignored) { }
+        }
+        if (max <= 0) return; // 0 或负数 = 关闭闸门
+        List<BizTechDebt> debts = techDebtMapper.selectList(new LambdaQueryWrapper<BizTechDebt>()
+                .eq(BizTechDebt::getProjectId, projectId)
+                .in(BizTechDebt::getStatus, "PENDING", "OPEN", "SCHEDULED"));
+        double total = 0;
+        for (BizTechDebt d : debts) {
+            if (d.getEstimatedHours() != null) total += d.getEstimatedHours().doubleValue();
+        }
+        if (total > max) {
+            throw BusinessException.badRequest(String.format(
+                    "项目未偿还技术债存量 %.1fh 已超过阈值 %.1fh,请先将部分债务排入迭代偿还(或在系统设置调整 debt.max.hours)",
+                    total, max));
+        }
     }
 
     /** 迭代状态机：仅允许 未开始 → 进行中 → 已完成 的相邻正向流转。 */

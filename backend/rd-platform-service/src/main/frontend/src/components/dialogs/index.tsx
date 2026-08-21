@@ -31,6 +31,9 @@ import {
   Timer, Scissors, UserPlus, ThumbsUp, ThumbsDown, Loader2, Plus
 } from "lucide-react";
 import { toast } from "sonner";
+import PrioritySelectItems from "@/components/PrioritySelectItems";
+import StepListInput, { serializeSteps } from "@/components/forms/StepListInput";
+import StepFormWizard from "@/components/forms/StepFormWizard";
 
 // ===================== 工时填报弹窗 =====================
 interface LogHoursDialogProps {
@@ -614,10 +617,7 @@ export function AssignTaskDialog({ open, onOpenChange, taskId = "", taskTitle = 
                   <SelectValue placeholder="选择优先级" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="P0">P0 - 紧急</SelectItem>
-                  <SelectItem value="P1">P1 - 高</SelectItem>
-                  <SelectItem value="P2">P2 - 中</SelectItem>
-                  <SelectItem value="P3">P3 - 低</SelectItem>
+                  <PrioritySelectItems />
                 </SelectContent>
               </Select>
             </div>
@@ -1618,81 +1618,80 @@ export function ChangeRequestDialog({ open, onOpenChange }: ChangeRequestDialogP
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
-          <div className="space-y-2">
-            <Label className="text-sm font-medium">
-              变更需求 <span className="text-[#ef4444]">*</span>
-            </Label>
-            <Select value={formData.requirement} onValueChange={(v) => setFormData({ ...formData, requirement: v })}>
-              <SelectTrigger className="rounded-xl h-10">
-                <SelectValue placeholder="选择要变更的需求" />
-              </SelectTrigger>
-              <SelectContent>
-                {reqList.map((r: any) => (
-                  <SelectItem key={r.id} value={String(r.id)}>{r.title}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">
-                变更原因 <span className="text-[#ef4444]">*</span>
-              </Label>
-              <Select value={formData.reason} onValueChange={(v) => setFormData({ ...formData, reason: v })}>
-                <SelectTrigger className="rounded-xl h-10">
-                  <SelectValue placeholder="选择原因" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="business">业务需求调整</SelectItem>
-                  <SelectItem value="technical">技术方案变更</SelectItem>
-                  <SelectItem value="scope">范围变更</SelectItem>
-                  <SelectItem value="priority">优先级调整</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">影响范围</Label>
-              <Select value={formData.impact} onValueChange={(v) => setFormData({ ...formData, impact: v })}>
-                <SelectTrigger className="rounded-xl h-10">
-                  <SelectValue placeholder="选择影响" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">低 - 不影响排期</SelectItem>
-                  <SelectItem value="medium">中 - 需延期1-2天</SelectItem>
-                  <SelectItem value="high">高 - 需重新排期</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-sm font-medium">
-              变更描述 <span className="text-[#ef4444]">*</span>
-            </Label>
-            <Textarea
-              placeholder="详细描述变更内容、原因和期望结果..."
-              className="rounded-xl resize-none h-24"
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-            />
-          </div>
-        </div>
-
-        <DialogFooter className="gap-2">
-          <Button variant="outline" className="rounded-xl" onClick={() => onOpenChange(false)}>
-            取消
-          </Button>
-          <Button
-            className="rounded-xl bg-[#f97316] hover:bg-[#ea580c] text-white"
-            onClick={handleSubmit}
-            disabled={submitting}
-          >
-            {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            提交变更
-          </Button>
-        </DialogFooter>
+        <StepFormWizard
+          submitting={submitting}
+          submitLabel="提交变更"
+          onError={(msg) => toast.error(msg)}
+          onSubmit={handleSubmit}
+          steps={[
+            {
+              title: "改什么",
+              validate: () => {
+                if (!formData.requirement) return "请选择要变更的需求";
+                if (formData.description.trim().length < 10) return "变更内容描述不少于 10 个字";
+                return null;
+              },
+              content: (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">变更需求 <span className="text-[#ef4444]">*</span></Label>
+                    <Select value={formData.requirement} onValueChange={(v) => setFormData({ ...formData, requirement: v })}>
+                      <SelectTrigger className="rounded-xl h-10"><SelectValue placeholder="选择要变更的需求" /></SelectTrigger>
+                      <SelectContent>
+                        {reqList.map((r: any) => (
+                          <SelectItem key={r.id} value={String(r.id)}>{r.title}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">变更内容 <span className="text-[#ef4444]">*</span></Label>
+                    <Textarea placeholder="具体改什么:调整哪些功能点/字段/交互,变更后的期望形态"
+                      className="rounded-xl resize-none h-24" value={formData.description}
+                      onChange={(e) => setFormData({ ...formData, description: e.target.value })} />
+                  </div>
+                </div>
+              ),
+            },
+            {
+              title: "为什么",
+              validate: () => (!formData.reason ? "请选择变更原因" : null),
+              content: (
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">变更原因 <span className="text-[#ef4444]">*</span></Label>
+                  <Select value={formData.reason} onValueChange={(v) => setFormData({ ...formData, reason: v })}>
+                    <SelectTrigger className="rounded-xl h-10"><SelectValue placeholder="选择原因" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="business">业务需求调整</SelectItem>
+                      <SelectItem value="technical">技术方案变更</SelectItem>
+                      <SelectItem value="scope">范围变更</SelectItem>
+                      <SelectItem value="priority">优先级调整</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground pt-1">审批人会根据原因类型评估变更合理性,请如实选择</p>
+                </div>
+              ),
+            },
+            {
+              title: "影响谁",
+              validate: () => (!formData.impact ? "请评估影响范围" : null),
+              content: (
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">影响范围 <span className="text-[#ef4444]">*</span></Label>
+                  <Select value={formData.impact} onValueChange={(v) => setFormData({ ...formData, impact: v })}>
+                    <SelectTrigger className="rounded-xl h-10"><SelectValue placeholder="选择影响" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">低 - 不影响排期</SelectItem>
+                      <SelectItem value="medium">中 - 需延期1-2天</SelectItem>
+                      <SelectItem value="high">高 - 需重新排期</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground pt-1">提交后进入"产品经理 + 需求负责人"双重审批,通过后变更生效</p>
+                </div>
+              ),
+            },
+          ]}
+        />
       </DialogContent>
     </Dialog>
   );
@@ -1713,8 +1712,12 @@ export function SubmitBugDialog({ open, onOpenChange, onSuccess }: SubmitBugDial
   const [form, setForm] = useState({
     projectId: "", title: "", severity: "MAJOR", priority: "HIGH",
     moduleName: "", assigneeId: "", description: "",
-    expectedResult: "", actualResult: "", environment: "", requirementId: "",
+    expectedResult: "", actualResult: "", environment: "", frequency: "ALWAYS", requirementId: "",
   });
+  // 结构化复现步骤(默认开启);structMode=false 时退回自由文本(轻量场景)
+  const [reproSteps, setReproSteps] = useState<string[]>([""]);
+  const [structMode, setStructMode] = useState(true);
+  const [freeSteps, setFreeSteps] = useState("");
 
   useEffect(() => {
     if (open) {
@@ -1728,33 +1731,36 @@ export function SubmitBugDialog({ open, onOpenChange, onSuccess }: SubmitBugDial
       setForm({
         projectId: "", title: "", severity: "MAJOR", priority: "HIGH",
         moduleName: "", assigneeId: "", description: "",
-        expectedResult: "", actualResult: "", environment: "", requirementId: "",
+        expectedResult: "", actualResult: "", environment: "", frequency: "ALWAYS", requirementId: "",
       });
+      setReproSteps([""]);
+      setStructMode(true);
+      setFreeSteps("");
     }
   }, [open]);
 
   const handleSubmit = async () => {
-    if (!form.projectId) { toast.error("请选择所属项目"); return; }
-    if (!form.title || !form.description || !form.expectedResult || !form.actualResult || !form.moduleName || !form.assigneeId) {
-      toast.error("请填写所有必填字段（标题、描述、预期结果、实际结果、所属模块、负责人）");
-      return;
-    }
     setSubmitting(true);
     try {
+      // 现象描述与复现步骤分段序列化进 description(纯文本,兼容所有展示处)
+      const stepsText = structMode ? serializeSteps(reproSteps) : freeSteps.trim();
+      const description = `【问题描述】\n${form.description.trim()}\n\n【复现步骤】\n${stepsText}`;
       const payload: any = {
         projectId: Number(form.projectId),
         title: form.title,
-        description: form.description,
+        description,
         severity: form.severity,
         priority: form.priority,
         expectedResult: form.expectedResult,
         actualResult: form.actualResult,
         moduleName: form.moduleName,
         assigneeId: Number(form.assigneeId),
+        environment: form.environment,
+        frequency: form.frequency,
       };
       if (form.requirementId) payload.requirementId = Number(form.requirementId);
       await bugApiSvc.create(payload);
-      toast.success("Bug已提交，等待开发人员确认（R3交叉确认规则）");
+      toast.success("Bug已提交，等待确认（R3交叉确认规则）");
       onOpenChange(false);
       onSuccess?.();
     } catch (e: any) {
@@ -1763,6 +1769,11 @@ export function SubmitBugDialog({ open, onOpenChange, onSuccess }: SubmitBugDial
       setSubmitting(false);
     }
   };
+
+  const validSteps = reproSteps.map(s => s.trim()).filter(Boolean);
+  // 档位=团队成熟度:仅轻量档项目允许自由文本,标准/完整档强制分步(后端同样硬校验)
+  const selectedBugProject = projects.find((p: any) => String(p.id) === form.projectId);
+  const isLightGear = selectedBugProject?.gearLevel === "LIGHTWEIGHT";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1774,49 +1785,312 @@ export function SubmitBugDialog({ open, onOpenChange, onSuccess }: SubmitBugDial
             </div>
             提交缺陷
           </DialogTitle>
-          <DialogDescription>记录缺陷详情，提交后由开发人员确认（R3交叉确认规则）</DialogDescription>
+          <DialogDescription>分步填写，确保缺陷可复现、可定位（R3交叉确认规则）</DialogDescription>
+        </DialogHeader>
+
+        <StepFormWizard
+          submitting={submitting}
+          submitLabel="提交缺陷"
+          onError={(msg) => toast.error(msg)}
+          onSubmit={handleSubmit}
+          steps={[
+            {
+              title: "基本信息",
+              validate: () => {
+                if (!form.projectId) return "请选择所属项目";
+                if (!form.moduleName) return "请填写所属模块";
+                if (!form.title) return "请填写缺陷标题";
+                if (!form.assigneeId) return "请指派负责人";
+                return null;
+              },
+              content: (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">所属项目 <span className="text-[#ef4444]">*</span></Label>
+                      <Select value={form.projectId} onValueChange={(v) => {
+                        setForm({ ...form, projectId: v });
+                        // 切到非轻量档项目时强制回到分步模式
+                        const p = projects.find((x: any) => String(x.id) === v);
+                        if (p?.gearLevel !== "LIGHTWEIGHT") setStructMode(true);
+                      }}>
+                        <SelectTrigger className="rounded-xl h-10"><SelectValue placeholder="选择项目" /></SelectTrigger>
+                        <SelectContent>
+                          {projects.length === 0 && <div className="px-3 py-2 text-sm text-muted-foreground">暂无项目</div>}
+                          {projects.map((p: any) => (
+                            <SelectItem key={p.id} value={String(p.id)}>{p.projectName || p.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">所属模块 <span className="text-[#ef4444]">*</span></Label>
+                      <Input className="rounded-xl h-10" value={form.moduleName}
+                        onChange={(e) => setForm({ ...form, moduleName: e.target.value })}
+                        placeholder="如：支付模块" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">缺陷标题 <span className="text-[#ef4444]">*</span></Label>
+                    <Input className="rounded-xl h-10" value={form.title}
+                      onChange={(e) => setForm({ ...form, title: e.target.value })}
+                      placeholder="简洁描述Bug现象" />
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">严重程度 <span className="text-[#ef4444]">*</span></Label>
+                      <Select value={form.severity} onValueChange={(v) => setForm({ ...form, severity: v })}>
+                        <SelectTrigger className="rounded-xl h-10"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="BLOCKER">阻塞</SelectItem>
+                          <SelectItem value="CRITICAL">严重</SelectItem>
+                          <SelectItem value="MAJOR">主要</SelectItem>
+                          <SelectItem value="MINOR">次要</SelectItem>
+                          <SelectItem value="TRIVIAL">轻微</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">优先级 <span className="text-[#ef4444]">*</span></Label>
+                      <Select value={form.priority} onValueChange={(v) => setForm({ ...form, priority: v })}>
+                        <SelectTrigger className="rounded-xl h-10"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="HIGH">高</SelectItem>
+                          <SelectItem value="MEDIUM">中</SelectItem>
+                          <SelectItem value="LOW">低</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">指派负责人 <span className="text-[#ef4444]">*</span></Label>
+                      <Select value={form.assigneeId} onValueChange={(v) => setForm({ ...form, assigneeId: v })}>
+                        <SelectTrigger className="rounded-xl h-10"><SelectValue placeholder="选择" /></SelectTrigger>
+                        <SelectContent>
+                          {devs.map((u: any) => (
+                            <SelectItem key={u.id} value={String(u.id)}>{u.nickname || u.username} ({u.roleName})</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+              ),
+            },
+            {
+              title: "现象与环境",
+              validate: () => {
+                if (!form.description.trim()) return "请描述问题现象";
+                if (!form.environment.trim()) return "请填写测试环境";
+                return null;
+              },
+              content: (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">发生了什么 <span className="text-[#ef4444]">*</span></Label>
+                    <Textarea className="rounded-xl resize-none h-20" value={form.description}
+                      onChange={(e) => setForm({ ...form, description: e.target.value })}
+                      placeholder="用一两句话描述问题现象,复现步骤在下一步逐条填写" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">测试环境 <span className="text-[#ef4444]">*</span></Label>
+                      <Input className="rounded-xl h-10" value={form.environment}
+                        onChange={(e) => setForm({ ...form, environment: e.target.value })}
+                        placeholder="如：dev环境 Chrome 126" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">复现频率 <span className="text-[#ef4444]">*</span></Label>
+                      <Select value={form.frequency} onValueChange={(v) => setForm({ ...form, frequency: v })}>
+                        <SelectTrigger className="rounded-xl h-10"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ALWAYS">必现</SelectItem>
+                          <SelectItem value="OFTEN">经常</SelectItem>
+                          <SelectItem value="SOMETIMES">偶发</SelectItem>
+                          <SelectItem value="RARELY">极少</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+              ),
+            },
+            {
+              title: "复现步骤",
+              validate: () => {
+                if (structMode) {
+                  if (validSteps.length < 2) return "复现步骤至少填写 2 步";
+                  if (validSteps.some(s => s.length < 5)) return "每一步描述不少于 5 个字";
+                } else if (freeSteps.trim().length < 10) {
+                  return "复现步骤不少于 10 个字";
+                }
+                return null;
+              },
+              content: (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-medium">复现步骤 <span className="text-[#ef4444]">*</span></Label>
+                    {isLightGear ? (
+                      <button type="button" className="text-xs text-[#0088ff] hover:underline"
+                        onClick={() => setStructMode(!structMode)}>
+                        {structMode ? "切换为自由文本" : "切换为分步填写(推荐)"}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">当前项目档位要求分步填写</span>
+                    )}
+                  </div>
+                  {structMode ? (
+                    <StepListInput value={reproSteps} onChange={setReproSteps} placeholder="如：进入订单页,点击提交按钮" />
+                  ) : (
+                    <Textarea className="rounded-xl h-32" value={freeSteps}
+                      onChange={(e) => setFreeSteps(e.target.value)}
+                      placeholder={"1. 第一步\n2. 第二步\n3. 第三步"} />
+                  )}
+                  <p className="text-xs text-muted-foreground">写清"怎么操作能让 Bug 重现"——步骤越具体,开发定位越快</p>
+                </div>
+              ),
+            },
+            {
+              title: "结果对照",
+              validate: () => {
+                if (!form.expectedResult.trim()) return "请填写预期结果";
+                if (!form.actualResult.trim()) return "请填写实际结果";
+                return null;
+              },
+              content: (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">预期结果 <span className="text-[#ef4444]">*</span></Label>
+                      <Textarea className="rounded-xl resize-none h-24" value={form.expectedResult}
+                        onChange={(e) => setForm({ ...form, expectedResult: e.target.value })}
+                        placeholder="正确的预期行为" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">实际结果 <span className="text-[#ef4444]">*</span></Label>
+                      <Textarea className="rounded-xl resize-none h-24" value={form.actualResult}
+                        onChange={(e) => setForm({ ...form, actualResult: e.target.value })}
+                        placeholder="实际观察到的错误行为" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">关联需求ID（可选）</Label>
+                    <Input className="rounded-xl h-10" value={form.requirementId}
+                      onChange={(e) => setForm({ ...form, requirementId: e.target.value })}
+                      placeholder="可选" />
+                  </div>
+                </div>
+              ),
+            },
+          ]}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ============================================================================
+// ===================== 新建测试用例弹窗（真实接口，与测试管理页创建逻辑一致） =====================
+// 用例必须关联"已进入开发阶段"的需求及其一条验收标准(AC)，保证用例可追溯
+const CASE_ALLOWED_REQ_STATUS = ["DEVELOPING", "DEVELOPED", "TESTING", "TESTED", "RELEASING"];
+
+function splitAC(ac?: string): string[] {
+  if (!ac) return [];
+  return ac.split(/\r?\n|；|;/).map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+interface TestCaseCreateDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSuccess?: () => void;
+}
+
+export function TestCaseCreateDialog({ open, onOpenChange, onSuccess }: TestCaseCreateDialogProps) {
+  const [submitting, setSubmitting] = useState(false);
+  const [projects, setProjects] = useState<any[]>([]);
+  const [reqOptions, setReqOptions] = useState<any[]>([]);
+  const [selectedReq, setSelectedReq] = useState<any>(null);
+  const [caseSteps, setCaseSteps] = useState<string[]>([""]);
+  const [form, setForm] = useState({
+    projectId: "", requirementId: "", acRef: "", title: "", module: "",
+    precondition: "", steps: "", expectedResult: "", priority: "MEDIUM",
+  });
+
+  useEffect(() => {
+    if (open) {
+      projectApi.list({ pageNum: 1, pageSize: 100 }).then((res: any) => {
+        const list = res?.data?.records || res?.data?.list || res?.data || [];
+        setProjects(Array.isArray(list) ? list : []);
+      }).catch(() => setProjects([]));
+      requirementApi.list({ pageSize: 200 }).then((res: any) => {
+        const list = res?.data?.records || res?.data?.list || res?.data || [];
+        setReqOptions((Array.isArray(list) ? list : []).filter((r: any) => CASE_ALLOWED_REQ_STATUS.includes(r.status)));
+      }).catch(() => setReqOptions([]));
+      setSelectedReq(null);
+      setCaseSteps([""]);
+      setForm({ projectId: "", requirementId: "", acRef: "", title: "", module: "",
+        precondition: "", steps: "", expectedResult: "", priority: "MEDIUM" });
+    }
+  }, [open]);
+
+  const onSelectReq = (rid: string) => {
+    const req = reqOptions.find((r) => String(r.id) === rid) || null;
+    setSelectedReq(req);
+    setForm((f) => ({ ...f, requirementId: rid, acRef: "" }));
+  };
+
+  const handleSubmit = async () => {
+    if (!form.requirementId) { toast.error("请选择关联需求"); return; }
+    if (!form.acRef) { toast.error("请选择关联的验收标准(AC)"); return; }
+    const validCaseSteps = caseSteps.map(s => s.trim()).filter(Boolean);
+    if (!form.title || !form.module || validCaseSteps.length === 0 || !form.expectedResult || !form.precondition) {
+      toast.error("请填写所有必填字段（标题、模块、前置条件、步骤、预期结果）"); return;
+    }
+    setSubmitting(true);
+    try {
+      await testCaseApi.create({
+        caseName: form.title,
+        moduleName: form.module,
+        precondition: form.precondition,
+        steps: serializeSteps(caseSteps),
+        expectedResult: form.expectedResult,
+        priority: form.priority,
+        requirementId: Number(form.requirementId),
+        acRef: form.acRef,
+        projectId: form.projectId ? Number(form.projectId) : (selectedReq?.projectId || 1),
+      });
+      toast.success("测试用例创建成功");
+      onOpenChange(false);
+      onSuccess?.();
+    } catch (e: any) {
+      toast.error(e?.message || "创建失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[600px] rounded-2xl border-border/60 shadow-xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-lg">
+            <div className="w-8 h-8 rounded-xl bg-[#0088ff]/10 flex items-center justify-center">
+              <TestTube2 className="w-4 h-4 text-[#0088ff]" />
+            </div>
+            新建测试用例
+          </DialogTitle>
+          <DialogDescription>用例需关联已进入开发阶段的需求及其一条验收标准(AC)，保证可追溯</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label className="text-sm font-medium">所属项目 <span className="text-[#ef4444]">*</span></Label>
+              <Label className="text-sm font-medium">所属项目</Label>
               <Select value={form.projectId} onValueChange={(v) => setForm({ ...form, projectId: v })}>
-                <SelectTrigger className="rounded-xl h-10"><SelectValue placeholder="选择项目" /></SelectTrigger>
+                <SelectTrigger className="rounded-xl h-10"><SelectValue placeholder="默认取需求所属项目" /></SelectTrigger>
                 <SelectContent>
-                  {projects.length === 0 && <div className="px-3 py-2 text-sm text-muted-foreground">暂无项目</div>}
                   {projects.map((p: any) => (
                     <SelectItem key={p.id} value={String(p.id)}>{p.projectName || p.name}</SelectItem>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">所属模块 <span className="text-[#ef4444]">*</span></Label>
-              <Input className="rounded-xl h-10" value={form.moduleName}
-                onChange={(e) => setForm({ ...form, moduleName: e.target.value })}
-                placeholder="如：支付模块" />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-sm font-medium">缺陷标题 <span className="text-[#ef4444]">*</span></Label>
-            <Input className="rounded-xl h-10" value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-              placeholder="简洁描述Bug现象" />
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">严重程度 <span className="text-[#ef4444]">*</span></Label>
-              <Select value={form.severity} onValueChange={(v) => setForm({ ...form, severity: v })}>
-                <SelectTrigger className="rounded-xl h-10"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="BLOCKER">阻塞</SelectItem>
-                  <SelectItem value="CRITICAL">严重</SelectItem>
-                  <SelectItem value="MAJOR">主要</SelectItem>
-                  <SelectItem value="MINOR">次要</SelectItem>
-                  <SelectItem value="TRIVIAL">轻微</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1831,55 +2105,68 @@ export function SubmitBugDialog({ open, onOpenChange, onSuccess }: SubmitBugDial
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">指派负责人 <span className="text-[#ef4444]">*</span></Label>
-              <Select value={form.assigneeId} onValueChange={(v) => setForm({ ...form, assigneeId: v })}>
-                <SelectTrigger className="rounded-xl h-10"><SelectValue placeholder="选择" /></SelectTrigger>
-                <SelectContent>
-                  {devs.map((u: any) => (
-                    <SelectItem key={u.id} value={String(u.id)}>{u.nickname || u.username} ({u.roleName})</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
 
           <div className="space-y-2">
-            <Label className="text-sm font-medium">缺陷描述(复现步骤) <span className="text-[#ef4444]">*</span></Label>
-            <Textarea className="rounded-xl resize-none h-20" value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="详细描述复现步骤与影响范围" />
+            <Label className="text-sm font-medium">关联需求 <span className="text-[#ef4444]">*</span></Label>
+            <Select value={form.requirementId} onValueChange={onSelectReq}>
+              <SelectTrigger className="rounded-xl h-10"><SelectValue placeholder="选择已进入开发阶段的需求" /></SelectTrigger>
+              <SelectContent>
+                {reqOptions.length === 0 && <div className="px-3 py-2 text-sm text-muted-foreground">暂无可关联需求（需评审通过进入开发阶段）</div>}
+                {reqOptions.map((r: any) => (
+                  <SelectItem key={r.id} value={String(r.id)}>#{r.id} {r.title}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">关联验收标准(AC) <span className="text-[#ef4444]">*</span></Label>
+            <Select value={form.acRef} onValueChange={(v) => setForm({ ...form, acRef: v })} disabled={!selectedReq}>
+              <SelectTrigger className="rounded-xl h-10"><SelectValue placeholder={selectedReq ? "选择一条AC" : "请先选择需求"} /></SelectTrigger>
+              <SelectContent>
+                {splitAC(selectedReq?.acceptanceCriteria).map((ac, idx) => (
+                  <SelectItem key={idx} value={ac}>{ac.length > 50 ? ac.slice(0, 50) + "..." : ac}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label className="text-sm font-medium">预期结果 <span className="text-[#ef4444]">*</span></Label>
-              <Textarea className="rounded-xl resize-none h-16" value={form.expectedResult}
-                onChange={(e) => setForm({ ...form, expectedResult: e.target.value })}
-                placeholder="正确的预期行为" />
+              <Label className="text-sm font-medium">用例标题 <span className="text-[#ef4444]">*</span></Label>
+              <Input className="rounded-xl h-10" value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="模块-场景-预期" />
             </div>
             <div className="space-y-2">
-              <Label className="text-sm font-medium">实际结果 <span className="text-[#ef4444]">*</span></Label>
-              <Textarea className="rounded-xl resize-none h-16" value={form.actualResult}
-                onChange={(e) => setForm({ ...form, actualResult: e.target.value })}
-                placeholder="实际观察到的错误行为" />
+              <Label className="text-sm font-medium">所属模块 <span className="text-[#ef4444]">*</span></Label>
+              <Input className="rounded-xl h-10" value={form.module}
+                onChange={(e) => setForm({ ...form, module: e.target.value })} placeholder="如: 用户认证" />
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label className="text-sm font-medium">关联需求ID（可选）</Label>
-            <Input className="rounded-xl h-10" value={form.requirementId}
-              onChange={(e) => setForm({ ...form, requirementId: e.target.value })}
-              placeholder="可选" />
+            <Label className="text-sm font-medium">前置条件 <span className="text-[#ef4444]">*</span></Label>
+            <Textarea className="rounded-xl" rows={2} value={form.precondition}
+              onChange={(e) => setForm({ ...form, precondition: e.target.value })} placeholder="执行用例前需要满足的条件" />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">测试步骤 <span className="text-[#ef4444]">*</span></Label>
+            <StepListInput value={caseSteps} onChange={setCaseSteps} placeholder="描述这一步的测试操作" />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">预期结果 <span className="text-[#ef4444]">*</span></Label>
+            <Textarea className="rounded-xl" rows={2} value={form.expectedResult}
+              onChange={(e) => setForm({ ...form, expectedResult: e.target.value })} placeholder="期望的正确输出或行为" />
           </div>
         </div>
 
         <DialogFooter className="gap-2">
           <Button variant="outline" className="rounded-xl" onClick={() => onOpenChange(false)}>取消</Button>
-          <Button className="rounded-xl bg-[#ef4444] hover:bg-[#dc2626] text-white"
+          <Button className="rounded-xl bg-[#0088ff] hover:bg-[#0066cc] text-white"
             onClick={handleSubmit} disabled={submitting}>
             {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            提交缺陷
+            创建用例
           </Button>
         </DialogFooter>
       </DialogContent>

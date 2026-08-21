@@ -1,0 +1,1 @@
+{"projectId":38,"title":"ST-缺陷态专用","description":"轻档自由描述","expectedResult":"ok","actualResult":"fail","severity":"MINOR","priority":"P2","moduleName":"st","assigneeId":4,"environment":"dev","frequency":"ALWAYS"}

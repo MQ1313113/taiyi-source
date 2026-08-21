@@ -37,12 +37,17 @@ public class AuthService {
         SysUser user = userMapper.selectOne(
                 new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, request.getUsername()));
 
-        if (user == null || !passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+        if (user == null) {
             throw new BusinessException(401, "用户名或密码错误");
         }
 
+        // 先校验账号状态再校验密码：被禁用的账号无论密码对错都提示禁用,避免误导用户反复试密码
         if (user.getStatus() == 0) {
             throw new BusinessException(403, "账号已被禁用，请联系管理员");
+        }
+
+        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+            throw new BusinessException(401, "用户名或密码错误");
         }
 
         // Get roles
@@ -52,9 +57,10 @@ public class AuthService {
         // Generate token
         String token = jwtUtils.generateToken(user.getId(), user.getUsername(), rolesStr);
 
-        // Update login info
+        // Update login info。
+        // 注意:isFirstLogin 不在登录时清除——此前在此置 0 导致响应永远返回 0,
+        // "首次登录强制改密"从未生效;标记改为在 changePassword 成功后清除,绕过前端也逃不掉
         user.setLastLoginTime(LocalDateTime.now());
-        user.setIsFirstLogin(0);
         userMapper.updateById(user);
 
         // Build response

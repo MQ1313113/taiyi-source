@@ -14,8 +14,10 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [username, setUsername] = useState("");
+  // 记住我：登录成功后持久化用户名(不存密码)，下次打开自动回填
+  const [username, setUsername] = useState(() => localStorage.getItem("taiyi_remember_username") || "");
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(() => !!localStorage.getItem("taiyi_remember_username"));
   const { setRole } = useRole();
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -33,6 +35,7 @@ export default function LoginPage() {
     if (roles.includes("pm")) return "pm";
     if (roles.includes("developer") || roles.includes("dev")) return "developer";
     if (roles.includes("qa") || roles.includes("tester")) return "qa";
+    if (roles.includes("support")) return "support";
     return "developer";
   };
 
@@ -42,6 +45,7 @@ export default function LoginPage() {
       pm: "/app/dashboard/pm",
       developer: "/app/dashboard/dev",
       qa: "/app/dashboard/qa",
+      support: "/app/dashboard/support",
     };
     return paths[role];
   };
@@ -70,6 +74,9 @@ export default function LoginPage() {
         localStorage.setItem('taiyi_token', res.data.token);
         localStorage.setItem('taiyi_user', JSON.stringify(res.data));
         localStorage.setItem('taiyi_role', detectedRole);
+        // 记住我：仅持久化用户名，出于安全不保存密码
+        if (remember) localStorage.setItem('taiyi_remember_username', username.trim());
+        else localStorage.removeItem('taiyi_remember_username');
         setRole(detectedRole);
         // 首次登录或被管理员重置密码 → 强制先改密，改密成功前不进系统
         if (res.data.isFirstLogin === 1) {
@@ -83,7 +90,9 @@ export default function LoginPage() {
         toast.error("登录失败", { description: res.message || "用户名或密码错误" });
       }
     } catch (error: any) {
-      toast.error("登录失败", { description: "用户名或密码错误，请重试" });
+      // 透出后端真实原因(如"账号已被禁用"),不再一律显示"用户名或密码错误"
+      const msg = error?.message || error?.response?.data?.message || "用户名或密码错误，请重试";
+      toast.error("登录失败", { description: msg });
     } finally {
       setLoading(false);
     }
@@ -152,7 +161,7 @@ export default function LoginPage() {
 
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Checkbox id="remember" defaultChecked />
+                <Checkbox id="remember" checked={remember} onCheckedChange={(v) => setRemember(v === true)} />
                 <Label htmlFor="remember" className="text-sm text-muted-foreground cursor-pointer">
                   记住我
                 </Label>

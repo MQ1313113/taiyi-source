@@ -66,9 +66,10 @@ public class SprintController {
 
     @PutMapping("/{id}/complete")
     @AuditLog(module = "迭代管理", operation = "完成迭代")
-    public Result<?> complete(@PathVariable Long id) {
-        sprintService.changeStatus(id, "关闭迭代", "COMPLETED");
-        return Result.success("迭代已完成");
+    public Result<?> complete(@PathVariable Long id,
+                              @RequestParam(required = false) String unfinishedAction,
+                              @RequestParam(required = false) Long targetSprintId) {
+        return Result.success(sprintService.complete(id, unfinishedAction, targetSprintId));
     }
 
     @Data
